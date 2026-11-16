@@ -1,0 +1,9 @@
+apiVersion: v2
+name: infergate
+description: OpenAI-compatible LLM inference platform - Go gateway, Redis Streams queue, Python model workers, PostgreSQL model registry.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords: [llm, inference, gateway, keda, redis-streams]
+home: https://github.com/Epinnn14/infergate
+sources: [https://github.com/Epinnn14/infergate]

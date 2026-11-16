@@ -1,0 +1,26 @@
+{{- if .Values.networkPolicy.enabled }}
+{{- $full := include "infergate.fullname" . -}}
+{{- range $c := list "redis" "postgres" "registry" }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ $full }}-{{ $c }}
+  labels: {{- include "infergate.labels" $ | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "infergate.selector" (dict "ctx" $ "component" $c) | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # every component of this release (gateway, workers, registry)
+        - podSelector: { matchLabels: { app.kubernetes.io/instance: {{ $.Release.Name }} } }
+        {{- if and (eq $c "redis") $.Values.keda.enabled }}
+        # the KEDA operator reads stream lag (label differs across KEDA chart versions)
+        - namespaceSelector: {}
+          podSelector: { matchLabels: { app: keda-operator } }
+        - namespaceSelector: {}
+          podSelector: { matchLabels: { app.kubernetes.io/name: keda-operator } }
+        {{- end }}
+{{- end }}
+{{- end }}

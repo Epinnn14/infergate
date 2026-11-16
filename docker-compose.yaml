@@ -1,0 +1,74 @@
+# The whole platform on one machine, without Kubernetes:
+#   docker compose up --build --scale worker=3
+#   curl localhost:8080/v1/chat/completions -H "Authorization: Bearer sk-demo-local" \
+#        -d '{"model":"chat","messages":[{"role":"user","content":"halo"}]}'
+# Grafana: http://localhost:3000 (anonymous viewer), Prometheus: http://localhost:9090
+name: infergate
+
+x-worker-env: &worker-env
+  IG_REDIS_URL: redis://redis:6379/0
+  IG_MODEL: sim-v1
+  IG_BACKEND: fake
+  IG_CAPACITY: "8"
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 2s, retries: 20 }
+
+  postgres:
+    image: postgres:16-alpine
+    environment: { POSTGRES_USER: infergate, POSTGRES_PASSWORD: infergate, POSTGRES_DB: infergate }
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U infergate"], interval: 2s, retries: 30 }
+
+  registry:
+    build: ./registry
+    environment:
+      IG_DATABASE_URL: postgresql://infergate:infergate@postgres:5432/infergate
+      IG_ADMIN_TOKEN: admin-local
+      IG_ROUTES_TOKEN: routes-local
+      IG_BOOTSTRAP: >-
+        {"models": [{"name": "chat", "versions": [{"name": "sim-v1", "weight": 100}, {"name": "sim-v2", "weight": 0}]}],
+         "keys": [{"name": "demo", "key": "sk-demo-local", "rpm": 0, "tpm": 0}]}
+    depends_on: { postgres: { condition: service_healthy } }
+    ports: ["8090:8090"]
+
+  gateway:
+    build: .
+    environment:
+      IG_REDIS_ADDR: redis:6379
+      IG_REGISTRY_URL: http://registry:8090
+      IG_REGISTRY_TOKEN: routes-local
+    depends_on: { redis: { condition: service_healthy }, registry: { condition: service_started } }
+    ports: ["8080:8080"]
+
+  worker:
+    build: ./worker
+    environment: *worker-env
+    depends_on: { redis: { condition: service_healthy } }
+
+  # the canary version, scaled to 0 until you shift weight to it:
+  #   docker compose up -d --scale worker-v2=1
+  #   curl -X PUT localhost:8090/v1/models/chat/weights -H "Authorization: Bearer admin-local" -d '{"sim-v1":90,"sim-v2":10}'
+  worker-v2:
+    build: ./worker
+    environment: { <<: *worker-env, IG_MODEL: sim-v2, IG_FAKE_TOKENS_PER_S: "60" }
+    depends_on: { redis: { condition: service_healthy } }
+    deploy: { replicas: 0 }
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    volumes: ["./deploy/compose/prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+    volumes:
+      - ./deploy/compose/grafana-datasource.yml:/etc/grafana/provisioning/datasources/prometheus.yml:ro
+      - ./deploy/compose/grafana-dashboards.yml:/etc/grafana/provisioning/dashboards/infergate.yml:ro
+      - ./deploy/helm/infergate/files/dashboard.json:/var/lib/grafana/dashboards/infergate.json:ro
+    ports: ["3000:3000"]

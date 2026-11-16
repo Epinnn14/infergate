@@ -1,0 +1,42 @@
+{{- if .Values.istio.enabled }}
+{{- $full := include "infergate.fullname" . -}}
+apiVersion: security.istio.io/v1
+kind: PeerAuthentication
+metadata:
+  name: {{ $full }}
+  labels: {{- include "infergate.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels: { app.kubernetes.io/instance: {{ .Release.Name }} }
+  mtls: { mode: {{ .Values.istio.mtls }} }
+---
+# Streams are long-lived: no retries (a retried completion would bill and generate twice),
+# and HTTP/1.1 keep-alive pools sized for SSE.
+apiVersion: networking.istio.io/v1
+kind: DestinationRule
+metadata:
+  name: {{ $full }}-gateway
+  labels: {{- include "infergate.labels" . | nindent 4 }}
+spec:
+  host: {{ $full }}-gateway
+  trafficPolicy:
+    connectionPool:
+      http: { http1MaxPendingRequests: 4096, maxRequestsPerConnection: 0, idleTimeout: 300s }
+    outlierDetection: { consecutive5xxErrors: 20, interval: 10s, baseEjectionTime: 30s, maxEjectionPercent: 50 }
+{{- if .Values.istio.ingress.enabled }}
+---
+apiVersion: networking.istio.io/v1
+kind: VirtualService
+metadata:
+  name: {{ $full }}
+  labels: {{- include "infergate.labels" . | nindent 4 }}
+spec:
+  hosts: {{- toYaml .Values.istio.ingress.hosts | nindent 4 }}
+  gateways: [{{ .Values.istio.ingress.gateway }}]
+  http:
+    - match: [{ uri: { prefix: /v1/ } }]
+      route: [{ destination: { host: {{ $full }}-gateway, port: { number: {{ .Values.gateway.service.port }} } } }]
+      timeout: {{ .Values.gateway.requestTimeout }}
+      retries: { attempts: 0 }
+{{- end }}
+{{- end }}

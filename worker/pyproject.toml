@@ -1,0 +1,27 @@
+[project]
+name = "infergate-worker"
+version = "0.1.0"
+description = "infergate model worker: pulls chat requests from Redis Streams, streams tokens back"
+requires-python = ">=3.11"
+dependencies = [
+  "redis>=5.2",
+  "prometheus-client>=0.20",
+]
+
+[project.optional-dependencies]
+hf = ["torch>=2.3", "transformers>=4.45", "accelerate>=0.33"]
+test = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[project.scripts]
+infergate-worker = "infergate_worker.main:run"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["infergate_worker*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

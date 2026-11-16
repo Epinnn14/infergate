@@ -1,0 +1,204 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go (gateway, router, rate limiter)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      # tests start their own redis-server per test (packages run in parallel and FLUSHDB)
+      - run: sudo apt-get update -q && sudo apt-get install -yq redis-server
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+      - run: go vet ./...
+      - run: go test -race -count=1 ./...
+      - run: go build -o bin/ ./cmd/...
+
+  python:
+    name: Python (${{ matrix.package }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        package: [worker, registry]
+    services:
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 2s --health-retries 20
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: postgres }
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 2s --health-retries 30
+    env:
+      REDIS_URL: redis://127.0.0.1:6379/0
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip, cache-dependency-path: "${{ matrix.package }}/pyproject.toml" }
+      - run: pip install -e "${{ matrix.package }}[test]"
+      - run: python -m pytest -q
+        working-directory: ${{ matrix.package }}
+
+  deploy-lint:
+    name: Helm, Kubernetes schemas, Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+        with: { version: v3.16.3 }
+      - name: helm lint
+        run: |
+          helm lint deploy/helm/infergate --strict
+          for f in deploy/helm/infergate/ci/*.yaml scripts/e2e-values.yaml; do helm lint deploy/helm/infergate --strict -f "$f"; done
+      - name: kubeconform (core and CRDs)
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
+          for f in "" deploy/helm/infergate/ci/full-values.yaml deploy/helm/infergate/ci/external-values.yaml scripts/e2e-values.yaml; do
+            echo "== values: ${f:-defaults}"
+            helm template infergate deploy/helm/infergate -n infergate ${f:+-f $f} \
+              | ./kubeconform -strict -summary -kubernetes-version 1.31.0 \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+          done
+          ./kubeconform -strict -summary -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            deploy/argocd/application.yaml
+      - uses: hashicorp/setup-terraform@v3
+        with: { terraform_version: 1.9.8 }
+      - name: terraform fmt
+        run: terraform fmt -check -recursive deploy/terraform
+      - name: terraform validate
+        run: |
+          for env in deploy/terraform/envs/*; do
+            echo "== $env"
+            terraform -chdir="$env" init -backend=false -input=false
+            terraform -chdir="$env" validate
+          done
+
+  bench:
+    name: Benchmark (affinity vs shared queue)
+    needs: [go, python]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: sudo apt-get update -q && sudo apt-get install -yq redis-server && sudo systemctl stop redis-server || true
+      - run: pip install -e worker
+      - name: bench
+        run: DUR=45s ./scripts/bench-local.sh
+      - name: chaos (SIGKILL a worker mid-load)
+        run: ./scripts/chaos-local.sh
+      - name: report
+        run: |
+          {
+            echo "## Routing benchmark (4 fake-GPU workers, 64 conversations, 24 clients)"
+            echo
+            python3 scripts/report.py results/affinity.json results/shared-queue.json
+            echo
+            echo "## Chaos: one of three workers SIGKILLed after 10 s"
+            echo
+            python3 scripts/report.py results/chaos.json
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: bench-results, path: results/ }
+
+  e2e:
+    name: Kubernetes end-to-end (kind + KEDA)
+    needs: [go, python, deploy-lint]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - uses: azure/setup-helm@v4
+        with: { version: v3.16.3 }
+      - uses: docker/setup-buildx-action@v3
+      - name: build images
+        run: |
+          for c in gateway:. worker:worker registry:registry; do
+            docker buildx build --load -t "infergate.local/infergate-${c%%:*}:dev" \
+              --cache-from "type=gha,scope=${c%%:*}" --cache-to "type=gha,mode=max,scope=${c%%:*}" "${c#*:}"
+          done
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: infergate
+          config: deploy/kind/cluster.yaml
+      - name: load images
+        run: kind load docker-image --name infergate infergate.local/infergate-{gateway,worker,registry}:dev
+      - run: go build -o bin/loadgen ./cmd/loadgen
+      - name: end-to-end
+        run: REPORT="$GITHUB_STEP_SUMMARY" ./scripts/e2e-kind.sh
+      - name: diagnostics
+        if: failure()
+        run: |
+          kubectl get all,scaledobjects,hpa -A
+          kubectl -n infergate describe pods
+          for p in $(kubectl -n infergate get pods -o name); do echo "== $p"; kubectl -n infergate logs "$p" --tail=80 --all-containers || true; done
+          kubectl -n keda logs deploy/keda-operator --tail=100 || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: e2e-results, path: results/ }
+
+  images:
+    name: Publish images (GHCR)
+    if: github.event_name == 'push'
+    needs: [e2e]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - { name: gateway, context: . }
+          - { name: worker, context: worker }
+          - { name: registry, context: registry }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/infergate-${{ matrix.name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+            type=semver,pattern={{version}}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}

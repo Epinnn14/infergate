@@ -1,0 +1,35 @@
+# Values for scripts/e2e-kind.sh: local images, small capacities so a CI runner can overload
+# the workers, and fast dead-worker detection for the chaos step.
+images:
+  gateway: { repository: infergate.local/infergate-gateway, tag: dev }
+  worker: { repository: infergate.local/infergate-worker, tag: dev }
+  registry: { repository: infergate.local/infergate-registry, tag: dev }
+  pullPolicy: Never
+gateway:
+  autoscaling: { enabled: false }
+  replicas: 1
+worker:
+  deadAfterSeconds: 6
+  reclaimIdleSeconds: 20
+models:
+  - name: chat
+    versions:
+      - name: sim-v1
+        weight: 100
+        backend: fake
+        capacity: 4
+        replicas: 1
+        env: {}
+        resources: { requests: { cpu: 50m, memory: 80Mi }, limits: { memory: 256Mi } }
+        autoscaling: { enabled: true, minReplicas: 1, maxReplicas: 6, lagPerReplica: 4, activationLag: 1 }
+      - name: sim-v2
+        weight: 0
+        backend: fake
+        capacity: 4
+        replicas: 0
+        env: { IG_FAKE_TOKENS_PER_S: "60" }
+        resources: { requests: { cpu: 50m, memory: 80Mi }, limits: { memory: 256Mi } }
+        autoscaling: { enabled: true, minReplicas: 0, maxReplicas: 3, lagPerReplica: 4, activationLag: 1 }
+# no rate limit: the load steps measure scaling, not the limiter (covered by Go tests)
+apiKeys:
+  - { name: demo, key: sk-demo-local, rpm: 0, tpm: 0, models: [] }

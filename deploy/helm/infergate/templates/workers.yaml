@@ -1,0 +1,131 @@
+{{- $full := include "infergate.fullname" . -}}
+{{- $redisURL := printf "redis://:$(IG_REDIS_PASSWORD)@%s:%s/0" (include "infergate.redisHost" .) (include "infergate.redisPort" .) -}}
+{{- range $m := .Values.models }}
+{{- range $v := $m.versions }}
+{{- $name := printf "%s-worker-%s" $full $v.name | trunc 63 | trimSuffix "-" }}
+{{- $sel := dict "ctx" $ "component" (printf "worker-%s" $v.name) }}
+{{- $as := default dict $v.autoscaling }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "infergate.labels" $ | nindent 4 }}
+    app.kubernetes.io/component: {{ printf "worker-%s" $v.name }}
+    infergate.io/model: {{ $m.name }}
+    infergate.io/version: {{ $v.name }}
+spec:
+  {{- if not (and $.Values.keda.enabled $as.enabled) }}
+  replicas: {{ $v.replicas }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "infergate.selector" $sel | nindent 6 }}
+  strategy:
+    # a new worker must be up before an old one drains, or a version can drop to zero
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels: {{- include "infergate.selector" $sel | nindent 8 }}
+        infergate.io/role: worker
+        infergate.io/model: {{ $m.name }}
+        infergate.io/version: {{ $v.name }}
+        {{- include "infergate.meshLabels" $ | nindent 8 }}
+    spec:
+      {{- with $.Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # IG_SHUTDOWN_GRACE_S to finish in-flight requests, then hand unread ones back
+      terminationGracePeriodSeconds: {{ add $.Values.worker.shutdownGraceSeconds 15 }}
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: worker
+          image: {{ include "infergate.image" (dict "ctx" $ "image" $.Values.images.worker) }}
+          imagePullPolicy: {{ $.Values.images.pullPolicy }}
+          ports:
+            - { name: metrics, containerPort: 9100 }
+          env:
+            {{- include "infergate.redisPasswordEnv" $ | nindent 12 }}
+            - { name: IG_REDIS_URL, value: {{ $redisURL | quote }} }
+            - { name: IG_MODEL, value: {{ $v.name | quote }} }
+            - name: IG_WORKER_ID
+              valueFrom: { fieldRef: { fieldPath: metadata.name } }
+            - { name: IG_BACKEND, value: {{ default "fake" $v.backend | quote }} }
+            - { name: IG_CAPACITY, value: {{ default 8 $v.capacity | quote }} }
+            - { name: IG_HEARTBEAT_S, value: {{ $.Values.worker.heartbeatSeconds | quote }} }
+            - { name: IG_DEAD_AFTER_S, value: {{ $.Values.worker.deadAfterSeconds | quote }} }
+            - { name: IG_RECLAIM_IDLE_S, value: {{ $.Values.worker.reclaimIdleSeconds | quote }} }
+            - { name: IG_SHUTDOWN_GRACE_S, value: {{ $.Values.worker.shutdownGraceSeconds | quote }} }
+            {{- range $k, $val := $v.env }}
+            - { name: {{ $k }}, value: {{ $val | quote }} }
+            {{- end }}
+          readinessProbe:
+            httpGet: { path: /metrics, port: metrics }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /metrics, port: metrics }
+            periodSeconds: 15
+            failureThreshold: 4
+          resources: {{- toYaml $v.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+      {{- with $.Values.worker.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $.Values.worker.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "infergate.selector" $sel | nindent 14 }}
+{{- if and $.Values.keda.enabled $as.enabled }}
+---
+# Scales on the version's shared stream. With prefix affinity, requests go to a worker's own
+# stream first and only reach the shared stream when every candidate is at capacity, so the
+# shared stream's lag is the overflow that the current replicas cannot absorb.
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ $name }}
+  labels: {{- include "infergate.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef: { name: {{ $name }} }
+  minReplicaCount: {{ $as.minReplicas }}
+  maxReplicaCount: {{ $as.maxReplicas }}
+  pollingInterval: {{ $.Values.keda.pollingInterval }}
+  cooldownPeriod: {{ $.Values.keda.cooldownPeriod }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleUp: { stabilizationWindowSeconds: 0, policies: [{ type: Pods, value: 4, periodSeconds: 15 }] }
+        scaleDown: { stabilizationWindowSeconds: 120, policies: [{ type: Pods, value: 1, periodSeconds: 30 }] }
+  triggers:
+    - type: redis-streams
+      authenticationRef: { name: {{ $full }}-redis }
+      metadata:
+        address: {{ printf "%s:%s" (include "infergate.redisHost" $) (include "infergate.redisPort" $) | quote }}
+        stream: {{ printf "ig:q:%s" $v.name | quote }}
+        consumerGroup: workers
+        lagCount: {{ default 8 $as.lagPerReplica | quote }}
+        activationLagCount: {{ default 1 $as.activationLag | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .Values.keda.enabled }}
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ $full }}-redis
+  labels: {{- include "infergate.labels" . | nindent 4 }}
+spec:
+  secretTargetRef:
+    {{- if and (not .Values.redis.enabled) .Values.redis.external.existingSecret }}
+    - { parameter: password, name: {{ .Values.redis.external.existingSecret }}, key: {{ .Values.redis.external.passwordKey }} }
+    {{- else }}
+    - { parameter: password, name: {{ include "infergate.secret" . }}, key: redis-password }
+    {{- end }}
+{{- end }}

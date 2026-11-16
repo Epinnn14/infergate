@@ -1,0 +1,137 @@
+# Images. tag "" means the chart's appVersion.
+images:
+  gateway: { repository: ghcr.io/epinnn14/infergate-gateway, tag: "" }
+  worker: { repository: ghcr.io/epinnn14/infergate-worker, tag: "" }
+  registry: { repository: ghcr.io/epinnn14/infergate-registry, tag: "" }
+  pullPolicy: IfNotPresent
+imagePullSecrets: []
+
+# ---------------------------------------------------------------- gateway (Go)
+gateway:
+  replicas: 2
+  requireKey: true
+  requestTimeout: 120s
+  maxQueue: 2000          # shared-queue depth per version before 503
+  maxLoad: 1.0            # (inflight + backlog) / capacity above which affinity spills
+  affinity: true          # false = shared queue only (the baseline in the benchmark)
+  heartbeatMaxAge: 5s
+  defaultMaxTokens: 256
+  registryPollInterval: 2s
+  service: { type: ClusterIP, port: 80 }
+  resources:
+    requests: { cpu: 100m, memory: 64Mi }
+    limits: { memory: 256Mi }
+  autoscaling: { enabled: true, minReplicas: 2, maxReplicas: 10, targetCPUUtilization: 70 }
+  podDisruptionBudget: { minAvailable: 1 }
+  nodeSelector: {}
+  tolerations: []
+
+# ---------------------------------------------------------------- registry (Python + PostgreSQL)
+registry:
+  replicas: 1
+  # Tokens for the admin API and for gateways reading routes. Empty = generated once and kept
+  # across upgrades. existingSecret must hold keys admin-token and routes-token.
+  adminToken: ""
+  routesToken: ""
+  existingSecret: ""
+  dbPool: 10
+  service: { port: 8090 }
+  resources:
+    requests: { cpu: 50m, memory: 96Mi }
+    limits: { memory: 256Mi }
+
+# ---------------------------------------------------------------- state
+redis:
+  enabled: true           # a single in-cluster Redis; for production point external at a managed one
+  image: redis:7.4-alpine
+  password: ""            # empty = generated and kept
+  maxmemory: 512mb
+  persistence: { enabled: false, size: 2Gi, storageClass: "" }
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 640Mi }
+  external: { addr: "", password: "", existingSecret: "", passwordKey: redis-password }
+
+postgres:
+  enabled: true
+  image: postgres:16-alpine
+  user: infergate
+  database: infergate
+  password: ""            # empty = generated and kept
+  persistence: { enabled: true, size: 1Gi, storageClass: "" }
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { memory: 512Mi }
+  external: { url: "", existingSecret: "", urlKey: database-url }
+
+# ---------------------------------------------------------------- models
+# Each version gets its own worker Deployment, its own Redis stream (ig:q:<version>) and,
+# with KEDA, its own autoscaler. weight is the initial traffic share (0-100) written on an
+# empty registry; later changes go through the admin API (PUT /v1/models/<model>/weights),
+# so a canary rollout does not need a Helm upgrade.
+models:
+  - name: chat
+    description: Simulated chat model (no GPU needed)
+    versions:
+      - name: sim-v1
+        weight: 100
+        backend: fake
+        capacity: 8
+        replicas: 2
+        env: {}
+        resources:
+          requests: { cpu: 100m, memory: 96Mi }
+          limits: { memory: 256Mi }
+        autoscaling: { enabled: true, minReplicas: 1, maxReplicas: 8, lagPerReplica: 8, activationLag: 1 }
+      - name: sim-v2
+        weight: 0
+        backend: fake
+        capacity: 8
+        replicas: 0
+        env: { IG_FAKE_TOKENS_PER_S: "60" }
+        resources:
+          requests: { cpu: 100m, memory: 96Mi }
+          limits: { memory: 256Mi }
+        autoscaling: { enabled: true, minReplicas: 0, maxReplicas: 4, lagPerReplica: 8, activationLag: 1 }
+
+worker:
+  heartbeatSeconds: 1
+  deadAfterSeconds: 15
+  reclaimIdleSeconds: 60
+  shutdownGraceSeconds: 25
+  nodeSelector: {}
+  tolerations: []
+  # e.g. for real models: { nvidia.com/gpu: 1 } in a version's resources.limits plus a GPU nodeSelector
+
+# API keys created on an empty registry. Real deployments create keys with POST /v1/keys
+# instead; keys here end up in a Secret, so keep this list for demos and tests.
+apiKeys:
+  - name: demo
+    key: sk-demo-local
+    rpm: 600
+    tpm: 2000000
+    models: []
+
+# ---------------------------------------------------------------- platform integrations
+keda:
+  enabled: true           # needs KEDA installed (ScaledObject CRD)
+  pollingInterval: 5
+  cooldownPeriod: 60
+
+monitoring:
+  serviceMonitor: { enabled: false, interval: 15s, labels: {} }   # needs prometheus-operator
+  prometheusRule: { enabled: false, labels: {} }
+  dashboard: { enabled: true, labels: { grafana_dashboard: "1" } } # picked up by the Grafana sidecar
+
+istio:
+  enabled: false          # needs Istio; gateway, registry and workers get sidecars (pod label)
+  # PERMISSIVE keeps Prometheus and KEDA (outside the mesh) able to reach metrics and Redis;
+  # STRICT once those run with sidecars too.
+  mtls: PERMISSIVE
+  ingress:
+    enabled: false
+    gateway: istio-system/ingressgateway
+    hosts: ["infergate.local"]
+
+networkPolicy:
+  enabled: true           # only the gateway is reachable from outside the release

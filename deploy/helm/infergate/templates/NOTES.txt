@@ -1,0 +1,17 @@
+infergate {{ .Chart.AppVersion }} is installed as "{{ .Release.Name }}".
+
+Try it:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "infergate.fullname" . }}-gateway 8080:{{ .Values.gateway.service.port }}
+{{- with first .Values.apiKeys }}
+  curl localhost:8080/v1/chat/completions -H "Authorization: Bearer {{ .key }}" \
+    -d '{"model":"{{ (first $.Values.models).name }}","messages":[{"role":"user","content":"hello"}],"stream":true}'
+{{- end }}
+
+Admin API (canary weights, keys):
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "infergate.fullname" . }}-registry 8090:{{ .Values.registry.service.port }}
+  TOKEN=$(kubectl -n {{ .Release.Namespace }} get secret {{ default (include "infergate.secret" .) .Values.registry.existingSecret }} -o jsonpath='{.data.admin-token}' | base64 -d)
+  curl -X PUT localhost:8090/v1/models/{{ (first .Values.models).name }}/weights -H "Authorization: Bearer $TOKEN" -d '{"<version>": 10}'
+{{- if not .Values.keda.enabled }}
+
+KEDA is off: worker replicas are fixed at models[].versions[].replicas.
+{{- end }}

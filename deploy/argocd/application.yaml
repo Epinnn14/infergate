@@ -1,0 +1,49 @@
+# GitOps: Argo CD keeps the cluster at what main says.
+#   kubectl apply -n argocd -f deploy/argocd/application.yaml
+# Canary weights are runtime state in the registry (admin API), not in Git, so a rollout does
+# not fight with Argo; replicas are owned by KEDA / the HPA and left out of the manifests.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: infergate
+  namespace: argocd
+  finalizers: [resources-finalizer.argocd.argoproj.io]
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/Epinnn14/infergate.git
+    targetRevision: main
+    path: deploy/helm/infergate
+    helm:
+      releaseName: infergate
+      valuesObject:
+        images:
+          gateway: { tag: latest }
+          worker: { tag: latest }
+          registry: { tag: latest }
+          pullPolicy: Always
+        monitoring:
+          serviceMonitor: { enabled: true }
+          prometheusRule: { enabled: true }
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: infergate
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      # Argo renders with `helm template`, where lookup() is empty, so generated passwords would
+      # change on every sync. Ignore them after the first apply and never re-apply them.
+      - RespectIgnoreDifferences=true
+    retry:
+      limit: 5
+      backoff: { duration: 10s, factor: 2, maxDuration: 3m }
+  ignoreDifferences:
+    - kind: Secret
+      name: infergate
+      jsonPointers:
+        - /data/admin-token
+        - /data/routes-token
+        - /data/redis-password
+        - /data/postgres-password

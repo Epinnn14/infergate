@@ -1,0 +1,115 @@
+{{- $name := printf "%s-gateway" (include "infergate.fullname" .) -}}
+{{- $sel := dict "ctx" . "component" "gateway" -}}
+{{- $tokens := default (include "infergate.secret" .) .Values.registry.existingSecret -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "infergate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  {{- if not .Values.gateway.autoscaling.enabled }}
+  replicas: {{ .Values.gateway.replicas }}
+  {{- end }}
+  selector:
+    matchLabels: {{- include "infergate.selector" $sel | nindent 6 }}
+  strategy:
+    rollingUpdate: { maxSurge: 25%, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels: {{- include "infergate.selector" $sel | nindent 8 }}
+        {{- include "infergate.meshLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      terminationGracePeriodSeconds: 40
+      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: gateway
+          image: {{ include "infergate.image" (dict "ctx" . "image" .Values.images.gateway) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8080 }
+          env:
+            - { name: IG_REDIS_ADDR, value: {{ printf "%s:%s" (include "infergate.redisHost" .) (include "infergate.redisPort" .) | quote }} }
+            {{- include "infergate.redisPasswordEnv" . | nindent 12 }}
+            - { name: IG_REGISTRY_URL, value: {{ printf "http://%s-registry:%v" (include "infergate.fullname" .) .Values.registry.service.port | quote }} }
+            - name: IG_REGISTRY_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $tokens }}, key: routes-token } }
+            - { name: IG_REGISTRY_INTERVAL, value: {{ .Values.gateway.registryPollInterval | quote }} }
+            - { name: IG_REQUIRE_KEY, value: {{ .Values.gateway.requireKey | quote }} }
+            - { name: IG_REQUEST_TIMEOUT, value: {{ .Values.gateway.requestTimeout | quote }} }
+            - { name: IG_MAX_QUEUE, value: {{ .Values.gateway.maxQueue | quote }} }
+            - { name: IG_MAX_LOAD, value: {{ .Values.gateway.maxLoad | quote }} }
+            - { name: IG_AFFINITY, value: {{ .Values.gateway.affinity | quote }} }
+            - { name: IG_HEARTBEAT_MAX_AGE, value: {{ .Values.gateway.heartbeatMaxAge | quote }} }
+            - { name: IG_DEFAULT_MAX_TOKENS, value: {{ .Values.gateway.defaultMaxTokens | quote }} }
+            - { name: IG_SHUTDOWN_GRACE, value: "25s" }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          lifecycle:
+            # let endpoints drop this pod before it stops accepting connections (Kubernetes 1.30+)
+            preStop: { sleep: { seconds: 5 } }
+          resources: {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+      {{- with .Values.gateway.nodeSelector }}
+      nodeSelector: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.gateway.tolerations }}
+      tolerations: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels: {{- include "infergate.selector" $sel | nindent 14 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "infergate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  type: {{ .Values.gateway.service.type }}
+  selector: {{- include "infergate.selector" $sel | nindent 4 }}
+  ports:
+    - { name: http, port: {{ .Values.gateway.service.port }}, targetPort: http, appProtocol: http }
+{{- if .Values.gateway.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ $name }}
+  labels: {{- include "infergate.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: {{ $name }} }
+  minReplicas: {{ .Values.gateway.autoscaling.minReplicas }}
+  maxReplicas: {{ .Values.gateway.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target: { type: Utilization, averageUtilization: {{ .Values.gateway.autoscaling.targetCPUUtilization }} }
+{{- end }}
+{{- with .Values.gateway.podDisruptionBudget }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ $name }}
+  labels: {{- include "infergate.labels" $ | nindent 4 }}
+spec:
+  minAvailable: {{ .minAvailable }}
+  selector:
+    matchLabels: {{- include "infergate.selector" $sel | nindent 6 }}
+{{- end }}

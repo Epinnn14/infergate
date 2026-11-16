@@ -1,0 +1,98 @@
+{{- $full := include "infergate.fullname" . -}}
+{{- with .Values.monitoring.serviceMonitor }}{{ if .enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ $full }}-gateway
+  labels: {{- include "infergate.labels" $ | nindent 4 }}
+    {{- with .labels }}{{ toYaml . | nindent 4 }}{{ end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      app.kubernetes.io/component: gateway
+  endpoints:
+    - { port: http, path: /metrics, interval: {{ .interval }} }
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ $full }}-workers
+  labels: {{- include "infergate.labels" $ | nindent 4 }}
+    {{- with .labels }}{{ toYaml . | nindent 4 }}{{ end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+      infergate.io/role: worker
+  podMetricsEndpoints:
+    - port: metrics
+      interval: {{ .interval }}
+      relabelings:
+        - { sourceLabels: [__meta_kubernetes_pod_label_infergate_io_version], targetLabel: version }
+{{- end }}{{ end }}
+{{- with .Values.monitoring.prometheusRule }}{{ if .enabled }}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ $full }}
+  labels: {{- include "infergate.labels" $ | nindent 4 }}
+    {{- with .labels }}{{ toYaml . | nindent 4 }}{{ end }}
+spec:
+  groups:
+    - name: infergate.slo
+      rules:
+        - record: infergate:ttft_seconds:p99_5m
+          expr: histogram_quantile(0.99, sum by (le, version) (rate(infergate_time_to_first_token_seconds_bucket[5m])))
+        - record: infergate:error_ratio_5m
+          expr: |
+            sum(rate(infergate_requests_total{code=~"5.."}[5m])) / clamp_min(sum(rate(infergate_requests_total[5m])), 1e-9)
+        - record: infergate:prefix_cache_hit_ratio_5m
+          expr: |
+            sum by (model) (rate(infergate_worker_prefix_cache_total{result="hit"}[5m]))
+              / clamp_min(sum by (model) (rate(infergate_worker_prefix_cache_total[5m])), 1e-9)
+    - name: infergate.alerts
+      rules:
+        - alert: InfergateHighErrorRate
+          expr: infergate:error_ratio_5m > 0.05
+          for: 5m
+          labels: { severity: critical }
+          annotations:
+            summary: More than 5% of chat completions fail with 5xx.
+        - alert: InfergateSlowFirstToken
+          expr: infergate:ttft_seconds:p99_5m > 5
+          for: 10m
+          labels: { severity: warning }
+          annotations:
+            summary: "p99 time to first token of {{`{{ $labels.version }}`}} is above 5s."
+        - alert: InfergateQueueBacklog
+          expr: max by (version) (infergate_queue_depth) > 500
+          for: 5m
+          labels: { severity: warning }
+          annotations:
+            summary: "{{`{{ $labels.version }}`}} has {{`{{ $value }}`}} queued requests; the autoscaler is not keeping up."
+        - alert: InfergateNoWorkers
+          expr: max by (version) (infergate_live_workers) == 0 and max by (version) (infergate_queue_depth) > 0
+          for: 3m
+          labels: { severity: critical }
+          annotations:
+            summary: "Requests are waiting for {{`{{ $labels.version }}`}} but no worker is alive."
+        - alert: InfergateWorkersRescuing
+          expr: sum(increase(infergate_worker_reclaimed_total[15m])) > 50
+          labels: { severity: warning }
+          annotations:
+            summary: Workers keep taking over requests from dead peers; check for crash loops or OOM kills.
+{{- end }}{{ end }}
+{{- with .Values.monitoring.dashboard }}{{ if .enabled }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $full }}-dashboard
+  labels: {{- include "infergate.labels" $ | nindent 4 }}
+    {{- with .labels }}{{ toYaml . | nindent 4 }}{{ end }}
+data:
+  infergate.json: |-
+{{ $.Files.Get "files/dashboard.json" | indent 4 }}
+{{- end }}{{ end }}

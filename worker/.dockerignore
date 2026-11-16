@@ -1,0 +1,7 @@
+bin/
+results/
+deploy/
+docs/
+**/__pycache__/
+**/.pytest_cache/
+.git/

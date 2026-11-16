@@ -1,0 +1,13 @@
+# Managed Redis and PostgreSQL, no KEDA, tokens from an existing Secret.
+redis:
+  enabled: false
+  external: { addr: redis.example.internal:6380, existingSecret: redis-creds }
+postgres:
+  enabled: false
+  external: { existingSecret: pg-creds }
+registry:
+  existingSecret: infergate-tokens
+keda:
+  enabled: false
+networkPolicy:
+  enabled: false

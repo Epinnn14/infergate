@@ -1,0 +1,9 @@
+# Every optional integration on: rendered and schema-checked in CI.
+monitoring:
+  serviceMonitor: { enabled: true, labels: { release: kube-prometheus-stack } }
+  prometheusRule: { enabled: true, labels: { release: kube-prometheus-stack } }
+istio:
+  enabled: true
+  ingress: { enabled: true }
+redis:
+  persistence: { enabled: true }

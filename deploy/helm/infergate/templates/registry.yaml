@@ -1,0 +1,62 @@
+{{- $name := printf "%s-registry" (include "infergate.fullname" .) -}}
+{{- $sel := dict "ctx" . "component" "registry" -}}
+{{- $tokens := default (include "infergate.secret" .) .Values.registry.existingSecret -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "infergate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: registry
+spec:
+  replicas: {{ .Values.registry.replicas }}
+  selector:
+    matchLabels: {{- include "infergate.selector" $sel | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "infergate.selector" $sel | nindent 8 }}
+        {{- include "infergate.meshLabels" . | nindent 8 }}
+      annotations:
+        checksum/bootstrap: {{ include "infergate.bootstrap" . | sha256sum | trunc 16 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+      containers:
+        - name: registry
+          image: {{ include "infergate.image" (dict "ctx" . "image" .Values.images.registry) }}
+          imagePullPolicy: {{ .Values.images.pullPolicy }}
+          ports:
+            - { name: http, containerPort: 8090 }
+          env:
+            {{- include "infergate.databaseUrlEnv" . | nindent 12 }}
+            - name: IG_ADMIN_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $tokens }}, key: admin-token } }
+            - name: IG_ROUTES_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ $tokens }}, key: routes-token } }
+            - name: IG_BOOTSTRAP
+              valueFrom: { secretKeyRef: { name: {{ include "infergate.secret" . }}, key: bootstrap.json } }
+            - { name: IG_DB_POOL, value: {{ .Values.registry.dbPool | quote }} }
+          readinessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 15
+            failureThreshold: 4
+          resources: {{- toYaml .Values.registry.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "infergate.labels" . | nindent 4 }}
+    app.kubernetes.io/component: registry
+spec:
+  selector: {{- include "infergate.selector" $sel | nindent 4 }}
+  ports:
+    - { name: http, port: {{ .Values.registry.service.port }}, targetPort: http, appProtocol: http }
