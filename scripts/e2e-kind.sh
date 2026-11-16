@@ -20,7 +20,8 @@ trap cleanup EXIT
 
 log() { echo "::group::$*"; }
 endlog() { echo "::endgroup::"; }
-replicas() { kubectl -n $NS get deploy "infergate-worker-$1" -o jsonpath='{.status.readyReplicas}' | sed 's/^$/0/'; }
+# readyReplicas is absent (not 0) when a Deployment is scaled to zero
+replicas() { local r; r=$(kubectl -n $NS get deploy "infergate-worker-$1" -o jsonpath='{.status.readyReplicas}'); echo "${r:-0}"; }
 
 {
   echo "## infergate end-to-end on kind"
