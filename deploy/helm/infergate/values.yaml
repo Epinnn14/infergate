@@ -135,3 +135,4 @@ istio:
 
 networkPolicy:
   enabled: true           # only the gateway is reachable from outside the release
+  kedaNamespace: keda     # where the KEDA operator runs; it is let in to Redis

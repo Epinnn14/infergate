@@ -44,7 +44,8 @@ app.kubernetes.io/component: {{ .component }}
 
 {{- define "infergate.redisHost" -}}
 {{- if .Values.redis.enabled -}}
-{{- printf "%s-redis" (include "infergate.fullname" .) -}}
+{{- /* namespace-qualified: the KEDA operator resolves it from its own namespace */ -}}
+{{- printf "%s-redis.%s.svc" (include "infergate.fullname" .) .Release.Namespace -}}
 {{- else -}}
 {{- required "redis.external.addr is required when redis.enabled=false" .Values.redis.external.addr | splitList ":" | first -}}
 {{- end -}}

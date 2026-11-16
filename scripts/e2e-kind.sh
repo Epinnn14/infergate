@@ -29,7 +29,13 @@ replicas() { kubectl -n $NS get deploy "infergate-worker-$1" -o jsonpath='{.stat
   echo "|---|---|"
 } >> "$REPORT"
 pass() { echo "| $1 | ✅ $2 |" >> "$REPORT"; }
-fail() { echo "| $1 | ❌ $2 |" >> "$REPORT"; echo "FAILED: $1: $2" >&2; kubectl -n $NS get pods,scaledobjects,hpa >&2 || true; exit 1; }
+fail() {
+  echo "| $1 | ❌ $2 |" >> "$REPORT"; echo "FAILED: $1: $2" >&2
+  kubectl -n $NS get pods,scaledobjects,hpa >&2 || true
+  kubectl -n $NS get scaledobjects -o jsonpath='{range .items[*]}{.metadata.name}: {.status.conditions}{"\n"}{end}' >&2 || true
+  kubectl -n keda logs deploy/keda-operator --tail=40 >&2 || true
+  exit 1
+}
 
 log "install KEDA"
 helm repo add kedacore https://kedacore.github.io/charts >/dev/null
@@ -55,6 +61,12 @@ kubectl -n $NS port-forward svc/infergate-registry 18090:8090 >/dev/null 2>&1 & 
 for _ in $(seq 60); do curl -sf localhost:18080/readyz >/dev/null && break; sleep 1; done
 GW=http://localhost:18080
 ADMIN=$(kubectl -n $NS get secret infergate -o jsonpath='{.data.admin-token}' | base64 -d)
+
+for so in sim-v1 sim-v2; do
+  kubectl -n $NS wait --for=condition=Ready "scaledobject/infergate-worker-$so" --timeout=120s \
+    || fail "KEDA" "ScaledObject for $so is not Ready"
+done
+pass "KEDA" "both ScaledObjects Ready (redis-streams trigger reaches Redis)"
 
 # ---------------------------------------------------------------- 1. API
 log "smoke"

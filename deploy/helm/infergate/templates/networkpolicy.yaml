@@ -16,11 +16,8 @@ spec:
         # every component of this release (gateway, workers, registry)
         - podSelector: { matchLabels: { app.kubernetes.io/instance: {{ $.Release.Name }} } }
         {{- if and (eq $c "redis") $.Values.keda.enabled }}
-        # the KEDA operator reads stream lag (label differs across KEDA chart versions)
-        - namespaceSelector: {}
-          podSelector: { matchLabels: { app: keda-operator } }
-        - namespaceSelector: {}
-          podSelector: { matchLabels: { app.kubernetes.io/name: keda-operator } }
+        # the KEDA operator reads stream lag
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: {{ $.Values.networkPolicy.kedaNamespace }} } }
         {{- end }}
 {{- end }}
 {{- end }}
