@@ -14,6 +14,10 @@ curl localhost:8080/v1/chat/completions -H "Authorization: Bearer sk-demo-local"
 
 Any OpenAI client works by pointing `base_url` at the gateway.
 
+**Use it for your own models.** Click **Use this template**, or read
+[docs/USING.md](docs/USING.md): quick start, connecting Ollama, vLLM or a hosted API, calling it
+from your app, canary rollouts, deployment and configuration.
+
 ## Measured
 
 These numbers come from the same machine, the same load and the same four simulated GPU workers
@@ -115,7 +119,9 @@ delivery guarantees and every failure mode with how it is handled.
 - **A simulated GPU backend** (`IG_BACKEND=fake`) models what makes inference scheduling hard:
   per-step latency grows with batch size, prefill cost is per prompt token, and an LRU prefix
   cache cuts prefill by 85% on a hit. With it, routing can be benchmarked on a laptop or a CI
-  runner. `IG_BACKEND=hf` serves a real Hugging Face model with the same protocol.
+  runner. `IG_BACKEND=openai` puts any OpenAI-compatible engine behind the same protocol:
+  Ollama, vLLM (as a sidecar), SGLang or a hosted API. `IG_BACKEND=hf` runs a Hugging Face
+  model in-process.
 
 ## Run it
 
@@ -177,7 +183,7 @@ The secret is returned once and only its SHA-256 hash is stored.
 | Job | What it proves |
 |---|---|
 | Go | `go vet`, `gofmt`, unit and integration tests with `-race` against real Redis: routing, rate limits, streaming, cancellation, overload shedding, restart after a worker died |
-| Python | Worker (8 tests: affinity streams, prefix cache, cancel and deadline, capacity, dead-worker rescue, kill during drain, stalled reclaim, graceful hand-back) and registry (canary weights, keys, idempotent bootstrap) against real Redis and PostgreSQL |
+| Python | Worker (14 tests: affinity streams, prefix cache, cancel and deadline, capacity, dead-worker rescue, kill during drain, stalled reclaim, graceful hand-back, the OpenAI-compatible engine backend) and registry (canary weights, keys, idempotent bootstrap) against real Redis and PostgreSQL |
 | Helm, Terraform | `helm lint --strict` and kubeconform on every values set, including the KEDA, Prometheus Operator and Istio CRDs; `terraform validate` for both environments |
 | Benchmark | Affinity versus shared queue, plus the chaos run, with tables in the job summary |
 | End-to-end on kind | Installs KEDA and the chart, then: API smoke test; KEDA scales workers out under 48 concurrent clients; a 20% canary on a version with 0 replicas scales from zero and serves traffic; a worker pod is force-deleted mid-load with no request lost |

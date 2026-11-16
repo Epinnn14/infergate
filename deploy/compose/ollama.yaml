@@ -1,0 +1,28 @@
+# Add a real model to the local stack: a worker that sends generation to Ollama on this computer.
+#   ollama pull llama3.2:1b
+#   docker compose down        # the registry is created fresh with the extra model
+#   docker compose -f docker-compose.yaml -f deploy/compose/ollama.yaml up --build -d --scale worker=1
+# Then pick model "llama" on http://localhost:8080 or call the API with "model": "llama".
+# Other engines: set OLLAMA_URL / OLLAMA_MODEL to any OpenAI-compatible server and model,
+# e.g. LM Studio at http://host.docker.internal:1234/v1.
+
+services:
+  registry:
+    environment:
+      IG_BOOTSTRAP: >-
+        {"models": [{"name": "chat", "versions": [{"name": "sim-v1", "weight": 100}, {"name": "sim-v2", "weight": 0}]},
+                    {"name": "llama", "description": "Ollama on the host", "versions": [{"name": "ollama-v1", "weight": 100, "backend": "openai"}]}],
+         "keys": [{"name": "demo", "key": "sk-demo-local", "rpm": 0, "tpm": 0}]}
+
+  worker-ollama:
+    build: ./worker
+    environment:
+      IG_REDIS_URL: redis://redis:6379/0
+      IG_MODEL: ollama-v1
+      IG_WORKER_ID: ollama-local
+      IG_BACKEND: openai
+      IG_CAPACITY: "2"            # Ollama runs a few requests at a time (OLLAMA_NUM_PARALLEL)
+      IG_UPSTREAM_URL: ${OLLAMA_URL:-http://host.docker.internal:11434/v1}
+      IG_UPSTREAM_MODEL: ${OLLAMA_MODEL:-llama3.2:1b}
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    depends_on: { redis: { condition: service_healthy } }

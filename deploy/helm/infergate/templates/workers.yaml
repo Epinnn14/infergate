@@ -36,7 +36,8 @@ spec:
       {{- end }}
       # IG_SHUTDOWN_GRACE_S to finish in-flight requests, then hand unread ones back
       terminationGracePeriodSeconds: {{ add $.Values.worker.shutdownGraceSeconds 15 }}
-      securityContext: { runAsNonRoot: true, runAsUser: 10001, seccompProfile: { type: RuntimeDefault } }
+      # non-root is set on the worker container, not the pod: engine sidecars (vLLM) run as root
+      securityContext: { seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: worker
           image: {{ include "infergate.image" (dict "ctx" $ "image" $.Values.images.worker) }}
@@ -55,6 +56,14 @@ spec:
             - { name: IG_DEAD_AFTER_S, value: {{ $.Values.worker.deadAfterSeconds | quote }} }
             - { name: IG_RECLAIM_IDLE_S, value: {{ $.Values.worker.reclaimIdleSeconds | quote }} }
             - { name: IG_SHUTDOWN_GRACE_S, value: {{ $.Values.worker.shutdownGraceSeconds | quote }} }
+            {{- with $v.upstream }}
+            - { name: IG_UPSTREAM_URL, value: {{ .url | quote }} }
+            - { name: IG_UPSTREAM_MODEL, value: {{ .model | quote }} }
+            {{- with .existingSecret }}
+            - name: IG_UPSTREAM_KEY
+              valueFrom: { secretKeyRef: { name: {{ .name }}, key: {{ .key }} } }
+            {{- end }}
+            {{- end }}
             {{- range $k, $val := $v.env }}
             - { name: {{ $k }}, value: {{ $val | quote }} }
             {{- end }}
@@ -67,8 +76,17 @@ spec:
             failureThreshold: 4
           resources: {{- toYaml $v.resources | nindent 12 }}
           securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
             allowPrivilegeEscalation: false
             capabilities: { drop: [ALL] }
+        {{- with $v.sidecars }}
+        # the model engine next to the worker, e.g. vLLM on the same GPU node (backend: openai)
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with $v.volumes }}
+      volumes: {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with $.Values.worker.nodeSelector }}
       nodeSelector: {{- toYaml . | nindent 8 }}
       {{- end }}

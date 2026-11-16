@@ -67,11 +67,11 @@ jobs:
       - name: helm lint
         run: |
           helm lint deploy/helm/infergate --strict
-          for f in deploy/helm/infergate/ci/*.yaml scripts/e2e-values.yaml; do helm lint deploy/helm/infergate --strict -f "$f"; done
+          for f in deploy/helm/infergate/ci/*.yaml deploy/helm/infergate/examples/*.yaml scripts/e2e-values.yaml; do helm lint deploy/helm/infergate --strict -f "$f"; done
       - name: kubeconform (core and CRDs)
         run: |
           curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz | tar xz kubeconform
-          for f in "" deploy/helm/infergate/ci/full-values.yaml deploy/helm/infergate/ci/external-values.yaml scripts/e2e-values.yaml; do
+          for f in "" deploy/helm/infergate/ci/*.yaml deploy/helm/infergate/examples/*.yaml scripts/e2e-values.yaml; do
             echo "== values: ${f:-defaults}"
             helm template infergate deploy/helm/infergate -n infergate ${f:+-f $f} \
               | ./kubeconform -strict -summary -kubernetes-version 1.31.0 \

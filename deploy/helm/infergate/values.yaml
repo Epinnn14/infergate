@@ -93,6 +93,10 @@ models:
           requests: { cpu: 100m, memory: 96Mi }
           limits: { memory: 256Mi }
         autoscaling: { enabled: true, minReplicas: 0, maxReplicas: 4, lagPerReplica: 8, activationLag: 1 }
+# A version can also be served by a real engine (backend: openai) with:
+#   upstream: { url: http://localhost:8000/v1, model: Qwen/Qwen2.5-7B-Instruct, existingSecret: { name, key } }
+#   sidecars: [ ...containers... ]   # e.g. vLLM in the same pod; see examples/vllm-gpu.yaml
+#   volumes:  [ ...volumes... ]
 
 worker:
   heartbeatSeconds: 1

@@ -80,6 +80,11 @@ Write-Host "  Windows PowerShell:"
 Write-Host ('  docker run ' + $runArgs + ' -e IG_WORKER_ID=$env:COMPUTERNAME ' + $image) -ForegroundColor Cyan
 Write-Host "  macOS / Linux:"
 Write-Host ('  docker run ' + $runArgs + ' -e IG_WORKER_ID=$(hostname) ' + $image) -ForegroundColor Cyan
+Write-Host "  With a real model instead (Ollama installed there, after: ollama pull llama3.2:1b),"
+Write-Host "  swap the simulated backend for Ollama; it shows up as model 'llama' on the chat page:"
+$ollama = "-e IG_MODEL=ollama-v1 -e IG_BACKEND=openai -e IG_CAPACITY=2 -e IG_UPSTREAM_URL=http://host.docker.internal:11434/v1 -e IG_UPSTREAM_MODEL=llama3.2:1b"
+Write-Host ('  docker run ' + ($runArgs -replace '-e IG_MODEL=sim-v1', $ollama) + ' -e IG_WORKER_ID=$env:COMPUTERNAME ' + $image) -ForegroundColor Cyan
+Write-Host "  (macOS / Linux: same flags; on Linux add --add-host host.docker.internal:host-gateway)"
 Write-Host "  Leave again:  docker rm -f infergate-worker"
 Write-Host ""
 Write-Host "If others cannot connect:"

@@ -46,4 +46,8 @@ def make(cfg) -> Backend:
         from .hf import HFBackend
 
         return HFBackend(cfg)
-    raise ValueError(f"unknown backend {cfg.backend!r} (fake, hf)")
+    if cfg.backend == "openai":
+        from .openai import OpenAIBackend
+
+        return OpenAIBackend(cfg)
+    raise ValueError(f"unknown backend {cfg.backend!r} (fake, hf, openai)")

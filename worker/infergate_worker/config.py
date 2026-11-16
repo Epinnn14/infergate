@@ -37,6 +37,13 @@ class Config:
     reclaim_idle_s: float = field(default_factory=lambda: _f("IG_RECLAIM_IDLE_S", 60.0))
     shutdown_grace_s: float = field(default_factory=lambda: _f("IG_SHUTDOWN_GRACE_S", 25.0))
 
+    # openai backend: an OpenAI-compatible engine (Ollama, vLLM, SGLang, LM Studio, a hosted API)
+    upstream_url: str = field(default_factory=lambda: os.environ.get("IG_UPSTREAM_URL", "http://127.0.0.1:11434/v1"))
+    upstream_model: str = field(default_factory=lambda: os.environ.get("IG_UPSTREAM_MODEL", "llama3.2:1b"))
+    upstream_key: str = field(default_factory=lambda: os.environ.get("IG_UPSTREAM_KEY", ""))
+    upstream_read_timeout_s: float = field(default_factory=lambda: _f("IG_UPSTREAM_READ_TIMEOUT_S", 300.0))
+    upstream_wait_s: float = field(default_factory=lambda: _f("IG_UPSTREAM_WAIT_S", 900.0))  # engine start-up
+
     # fake backend: a simulated accelerator, for load tests without a GPU
     fake_tokens_per_s: float = field(default_factory=lambda: _f("IG_FAKE_TOKENS_PER_S", 40.0))
     fake_batch_penalty: float = field(default_factory=lambda: _f("IG_FAKE_BATCH_PENALTY", 0.08))

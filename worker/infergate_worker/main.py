@@ -25,6 +25,7 @@ async def amain() -> None:
 
 def run() -> None:
     logging.basicConfig(level=logging.INFO, format='{"level":"%(levelname)s","logger":"%(name)s","msg":"%(message)s"}')
+    logging.getLogger("httpx").setLevel(logging.WARNING)  # one line per upstream request is noise
     asyncio.run(amain())
 
 

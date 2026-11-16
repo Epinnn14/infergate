@@ -25,6 +25,7 @@ ip=$(ipconfig getifaddr en0 2>/dev/null || hostname -I 2>/dev/null | awk '{print
 ip=${ip:-<this-computer-ip>}
 run="-d --name infergate-worker --restart unless-stopped -e IG_REDIS_URL=redis://:${IG_LAN_REDIS_PASSWORD}@${ip}:6379/0 -e IG_MODEL=sim-v1 -e IG_DEAD_AFTER_S=6"
 image=ghcr.io/epinnn14/infergate-worker:latest
+ollama="-e IG_MODEL=ollama-v1 -e IG_BACKEND=openai -e IG_CAPACITY=2 -e IG_UPSTREAM_URL=http://host.docker.internal:11434/v1 -e IG_UPSTREAM_MODEL=llama3.2:1b"
 cat <<MSG
 
 infergate is running in LAN mode on $ip
@@ -38,6 +39,9 @@ Join as a worker from another computer (needs Docker):
   docker run $run -e IG_WORKER_ID=\$env:COMPUTERNAME $image
   macOS / Linux:
   docker run $run -e IG_WORKER_ID=\$(hostname) $image
+  With a real model instead (Ollama installed there, after: ollama pull llama3.2:1b):
+  docker run ${run/-e IG_MODEL=sim-v1/$ollama} -e IG_WORKER_ID=\$(hostname) $image
+  (on Linux add --add-host host.docker.internal:host-gateway)
   Leave again:  docker rm -f infergate-worker
 
 Campus and cafe Wi-Fi often block devices from seeing each other: use a phone hotspot.

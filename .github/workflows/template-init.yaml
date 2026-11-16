@@ -1,0 +1,37 @@
+# Runs once in a repository created from this template ("Use this template" on GitHub):
+# rewrites the Go module path, image names and links to the new owner and repository and
+# commits the result. Does nothing in the original repository or after it has run.
+name: template-init
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  init:
+    if: github.repository != 'Epinnn14/infergate'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with: { go-version-file: go.mod }
+      - id: check
+        run: |
+          if grep -q 'module github.com/Epinnn14/infergate$' go.mod; then echo todo=true >> "$GITHUB_OUTPUT"; else echo todo=false >> "$GITHUB_OUTPUT"; fi
+      - if: steps.check.outputs.todo == 'true'
+        run: |
+          scripts/use-template.sh "${{ github.repository_owner }}" "${{ github.event.repository.name }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Point module path, images and links at ${{ github.repository }}"
+          git push
+          {
+            echo "### Template set up for ${{ github.repository }}"
+            echo
+            echo "Module path, images (ghcr.io/<owner>/infergate-*) and links now point here."
+            echo "Pull before you change anything: \`git pull\`."
+          } >> "$GITHUB_STEP_SUMMARY"

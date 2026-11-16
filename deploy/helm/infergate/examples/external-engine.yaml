@@ -1,0 +1,21 @@
+# Workers in front of an engine that already runs elsewhere (a vLLM Deployment, an inference
+# server on another cluster, or a hosted OpenAI-compatible API). infergate adds the queueing,
+# affinity, rate limits, canaries, autoscaling of the workers and metrics in front of it.
+#   kubectl create secret generic upstream-key --from-literal=key=sk-...
+models:
+  - name: assistant
+    versions:
+      - name: hosted-v1
+        weight: 100
+        backend: openai
+        capacity: 16
+        replicas: 2
+        upstream:
+          url: https://api.example.com/v1
+          model: some-model-name
+          existingSecret: { name: upstream-key, key: key }
+        resources:
+          requests: { cpu: 50m, memory: 96Mi }
+          limits: { memory: 256Mi }
+        autoscaling: { enabled: true, minReplicas: 1, maxReplicas: 10, lagPerReplica: 16, activationLag: 1 }
+apiKeys: []

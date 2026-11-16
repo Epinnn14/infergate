@@ -1,0 +1,52 @@
+# A real model on GPU nodes: each worker pod runs vLLM as a sidecar and talks to it on localhost.
+#   helm install infergate deploy/helm/infergate -f deploy/helm/infergate/examples/vllm-gpu.yaml
+# Needs the NVIDIA device plugin (nvidia.com/gpu) and a GPU node pool; adjust nodeSelector and
+# tolerations to your cluster. Scale-from-zero works but the first request waits for the model
+# to load (minutes), so this keeps one replica warm.
+worker:
+  nodeSelector: { nvidia.com/gpu.present: "true" }
+  tolerations:
+    - { key: nvidia.com/gpu, operator: Exists, effect: NoSchedule }
+  shutdownGraceSeconds: 60
+
+models:
+  - name: qwen
+    description: Qwen2.5 7B Instruct on vLLM
+    versions:
+      - name: qwen7b-v1
+        weight: 100
+        backend: openai
+        capacity: 32                      # vLLM batches many sequences on one GPU
+        replicas: 1
+        upstream: { url: "http://127.0.0.1:8000/v1", model: Qwen/Qwen2.5-7B-Instruct }
+        resources:
+          requests: { cpu: 100m, memory: 128Mi }
+          limits: { memory: 256Mi }
+        autoscaling: { enabled: true, minReplicas: 1, maxReplicas: 4, lagPerReplica: 16, activationLag: 1 }
+        sidecars:
+          - name: vllm
+            image: vllm/vllm-openai:v0.6.4
+            args: ["--model", "Qwen/Qwen2.5-7B-Instruct", "--port", "8000", "--max-model-len", "8192",
+                   "--enable-prefix-caching", "--gpu-memory-utilization", "0.9"]
+            ports: [{ name: engine, containerPort: 8000 }]
+            env:
+              - name: HF_TOKEN
+                valueFrom: { secretKeyRef: { name: hf-token, key: token, optional: true } }
+            resources:
+              requests: { cpu: "4", memory: 24Gi, nvidia.com/gpu: 1 }
+              limits: { memory: 32Gi, nvidia.com/gpu: 1 }
+            readinessProbe:
+              httpGet: { path: /health, port: engine }
+              periodSeconds: 10
+            startupProbe:
+              httpGet: { path: /health, port: engine }
+              periodSeconds: 10
+              failureThreshold: 90          # up to 15 minutes to download and load the weights
+            volumeMounts:
+              - { name: hf-cache, mountPath: /root/.cache/huggingface }
+              - { name: shm, mountPath: /dev/shm }
+        volumes:
+          - { name: hf-cache, emptyDir: {} }
+          - { name: shm, emptyDir: { medium: Memory, sizeLimit: 8Gi } }
+
+apiKeys: []   # create keys with the admin API: POST /v1/keys

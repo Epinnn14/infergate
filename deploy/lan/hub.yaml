@@ -21,7 +21,8 @@ services:
     environment:
       IG_ADMIN_TOKEN: ${IG_LAN_ADMIN}
       IG_BOOTSTRAP: >-
-        {"models": [{"name": "chat", "versions": [{"name": "sim-v1", "weight": 100}, {"name": "sim-v2", "weight": 0}]}],
+        {"models": [{"name": "chat", "versions": [{"name": "sim-v1", "weight": 100}, {"name": "sim-v2", "weight": 0}]},
+                    {"name": "llama", "description": "real model on laptops running Ollama", "versions": [{"name": "ollama-v1", "weight": 100, "backend": "openai"}]}],
          "keys": [{"name": "lan", "key": "${IG_LAN_KEY}", "rpm": 0, "tpm": 0}]}
 
   gateway:
