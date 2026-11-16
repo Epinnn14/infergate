@@ -24,7 +24,8 @@ spec:
       imagePullSecrets: {{- toYaml . | nindent 8 }}
       {{- end }}
       terminationGracePeriodSeconds: 40
-      securityContext: { runAsNonRoot: true, seccompProfile: { type: RuntimeDefault } }
+      # numeric uid: with a named USER (distroless "nonroot") the kubelet can't verify runAsNonRoot
+      securityContext: { runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, seccompProfile: { type: RuntimeDefault } }
       containers:
         - name: gateway
           image: {{ include "infergate.image" (dict "ctx" . "image" .Values.images.gateway) }}

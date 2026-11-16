@@ -22,23 +22,6 @@ log() { echo "::group::$*"; }
 endlog() { echo "::endgroup::"; }
 replicas() { kubectl -n $NS get deploy "infergate-worker-$1" -o jsonpath='{.status.readyReplicas}' | sed 's/^$/0/'; }
 
-log "install KEDA"
-helm repo add kedacore https://kedacore.github.io/charts >/dev/null
-helm upgrade --install keda kedacore/keda --version 2.16.0 -n keda --create-namespace --wait --timeout 5m
-endlog
-
-log "install infergate"
-helm upgrade --install infergate deploy/helm/infergate -n $NS --create-namespace --wait --timeout 6m \
-  -f scripts/e2e-values.yaml
-kubectl -n $NS get pods -o wide
-endlog
-
-kubectl -n $NS port-forward svc/infergate-gateway 18080:80 >/dev/null 2>&1 & pids+=($!)
-kubectl -n $NS port-forward svc/infergate-registry 18090:8090 >/dev/null 2>&1 & pids+=($!)
-for _ in $(seq 60); do curl -sf localhost:18080/readyz >/dev/null && break; sleep 1; done
-GW=http://localhost:18080
-ADMIN=$(kubectl -n $NS get secret infergate -o jsonpath='{.data.admin-token}' | base64 -d)
-
 {
   echo "## infergate end-to-end on kind"
   echo
@@ -47,6 +30,31 @@ ADMIN=$(kubectl -n $NS get secret infergate -o jsonpath='{.data.admin-token}' | 
 } >> "$REPORT"
 pass() { echo "| $1 | ✅ $2 |" >> "$REPORT"; }
 fail() { echo "| $1 | ❌ $2 |" >> "$REPORT"; echo "FAILED: $1: $2" >&2; kubectl -n $NS get pods,scaledobjects,hpa >&2 || true; exit 1; }
+
+log "install KEDA"
+helm repo add kedacore https://kedacore.github.io/charts >/dev/null
+helm upgrade --install keda kedacore/keda --version 2.16.0 -n keda --create-namespace --wait --timeout 5m
+endlog
+
+log "install infergate"
+if ! helm upgrade --install infergate deploy/helm/infergate -n $NS --create-namespace --wait --timeout 5m \
+  -f scripts/e2e-values.yaml; then
+  kubectl -n $NS get pods -o wide
+  kubectl -n $NS get events --sort-by=.lastTimestamp | tail -60
+  for p in $(kubectl -n $NS get pods -o name); do
+    echo "== $p"; kubectl -n $NS describe "$p" | sed -n '/^Containers:/,/^Volumes:/p' | grep -E 'State|Reason|Exit|Ready|Message' || true
+    kubectl -n $NS logs "$p" --tail=40 --all-containers 2>&1 || true
+  done
+  fail "install" "pods did not become ready (see the log of this step)"
+fi
+kubectl -n $NS get pods -o wide
+endlog
+
+kubectl -n $NS port-forward svc/infergate-gateway 18080:80 >/dev/null 2>&1 & pids+=($!)
+kubectl -n $NS port-forward svc/infergate-registry 18090:8090 >/dev/null 2>&1 & pids+=($!)
+for _ in $(seq 60); do curl -sf localhost:18080/readyz >/dev/null && break; sleep 1; done
+GW=http://localhost:18080
+ADMIN=$(kubectl -n $NS get secret infergate -o jsonpath='{.data.admin-token}' | base64 -d)
 
 # ---------------------------------------------------------------- 1. API
 log "smoke"

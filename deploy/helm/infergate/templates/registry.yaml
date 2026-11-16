@@ -37,12 +37,16 @@ spec:
             - name: IG_BOOTSTRAP
               valueFrom: { secretKeyRef: { name: {{ include "infergate.secret" . }}, key: bootstrap.json } }
             - { name: IG_DB_POOL, value: {{ .Values.registry.dbPool | quote }} }
+          # exec, not httpGet: the registry's NetworkPolicy only admits pods of this release, and
+          # not every CNI lets kubelet probes from the node through
           readinessProbe:
-            httpGet: { path: /healthz, port: http }
+            exec: { command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3)"] }
             periodSeconds: 5
+            timeoutSeconds: 4
           livenessProbe:
-            httpGet: { path: /healthz, port: http }
+            exec: { command: [python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3)"] }
             periodSeconds: 15
+            timeoutSeconds: 4
             failureThreshold: 4
           resources: {{- toYaml .Values.registry.resources | nindent 12 }}
           securityContext:

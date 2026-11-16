@@ -43,9 +43,10 @@ spec:
           readinessProbe:
             exec: { command: [sh, -c, 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG'] }
             periodSeconds: 5
-          livenessProbe:
-            tcpSocket: { port: redis }
+          livenessProbe:   # exec like readiness: NetworkPolicy may drop probes from the node
+            exec: { command: [sh, -c, 'redis-cli -a "$REDIS_PASSWORD" --no-auth-warning ping | grep -q PONG'] }
             periodSeconds: 10
+            failureThreshold: 6
           resources: {{- toYaml .Values.redis.resources | nindent 12 }}
           securityContext: { allowPrivilegeEscalation: false, capabilities: { drop: [ALL] } }
           volumeMounts:
