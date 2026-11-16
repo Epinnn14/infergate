@@ -256,17 +256,28 @@ func TestRateLimit(t *testing.T) {
 
 func TestAffinityKeepsConversationOnOneWorker(t *testing.T) {
 	ts, _, _ := setup(t, Config{}, "w1", "w2", "w3", "w4")
-	seen := map[string]string{}
 	for conv := 0; conv < 6; conv++ {
-		sys := map[string]string{"role": "system", "content": "persona " + string(rune('A'+conv))}
-		for turn := 0; turn < 3; turn++ {
-			res := post(t, ts, secret, map[string]any{"model": "chat", "messages": []map[string]string{sys, {"role": "user", "content": "turn"}}})
-			res.Body.Close()
-			w := res.Header.Get("X-Infergate-Worker")
-			if prev, ok := seen[sys["content"]]; ok && prev != w {
-				t.Fatalf("conversation %d moved from %s to %s", conv, prev, w)
+		// a real multi-turn chat: the history grows every turn
+		msgs := []map[string]string{{"role": "user", "content": "conversation " + string(rune('A'+conv))}}
+		var first string
+		for turn := 0; turn < 4; turn++ {
+			res := post(t, ts, secret, map[string]any{"model": "chat", "messages": msgs})
+			var out struct {
+				Choices []struct{ Message struct{ Content string } }
 			}
-			seen[sys["content"]] = w
+			_ = json.NewDecoder(res.Body).Decode(&out)
+			res.Body.Close()
+			w, route := res.Header.Get("X-Infergate-Worker"), res.Header.Get("X-Infergate-Route")
+			if route != "affinity" {
+				t.Fatalf("conversation %d turn %d routed %q", conv, turn, route)
+			}
+			if turn == 0 {
+				first = w
+			} else if w != first {
+				t.Fatalf("conversation %d moved from %s to %s at turn %d", conv, first, w, turn)
+			}
+			msgs = append(msgs, map[string]string{"role": "assistant", "content": out.Choices[0].Message.Content},
+				map[string]string{"role": "user", "content": "and then?"})
 		}
 	}
 }
@@ -351,5 +362,47 @@ func TestRestartAfterWorkerDied(t *testing.T) {
 	res.Body.Close()
 	if !strings.Contains(string(b), "worker restarted") || strings.Contains(string(b), "[DONE]") {
 		t.Fatalf("stream: %s", b)
+	}
+}
+
+func TestStatusAndChatPage(t *testing.T) {
+	ts, _, _ := setup(t, Config{}, "w1", "w2")
+	res, err := http.Get(ts.URL + "/status") // public: no key
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st struct {
+		Models []struct {
+			Name     string
+			Versions []struct {
+				Name    string
+				Weight  int
+				Workers []struct{ ID string }
+			}
+		}
+	}
+	if err := json.NewDecoder(res.Body).Decode(&st); err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if len(st.Models) != 1 || st.Models[0].Versions[0].Weight != 100 || len(st.Models[0].Versions[0].Workers) != 2 {
+		t.Fatalf("status = %+v", st)
+	}
+	b, _ := json.Marshal(st)
+	if strings.Contains(string(b), "team-a") || strings.Contains(string(b), secret) {
+		t.Fatal("status leaks key data")
+	}
+
+	res, err = http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || !strings.Contains(res.Header.Get("Content-Type"), "text/html") || !strings.Contains(string(page), "/v1/chat/completions") {
+		t.Fatalf("chat page: %d %s", res.StatusCode, res.Header.Get("Content-Type"))
+	}
+	if res, _ := http.Get(ts.URL + "/nope"); res.StatusCode != 404 {
+		t.Fatalf("unknown path served %d", res.StatusCode)
 	}
 }

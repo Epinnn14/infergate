@@ -56,6 +56,7 @@ class Worker:
         self.tasks: set[asyncio.Task] = set()
         self.stopping = asyncio.Event()
         self.drained = False
+        self.served = 0
         self.started = time.time()
 
     # ------------------------------------------------------------ setup
@@ -77,6 +78,7 @@ class Worker:
                 "inflight": len(self.tasks),
                 "capacity": self.cfg.capacity,
                 "started": int(self.started),
+                "served": self.served,
                 **{k: v for k, v in self.backend.stats().items() if isinstance(v, (int, float, str))},
             },
         )
@@ -117,6 +119,8 @@ class Worker:
             if stream != self.shared:
                 await self.r.xdel(stream, msg_id)  # own streams stay short: XLEN = backlog
             REQUESTS.labels(model, outcome).inc()
+            if outcome == "ok":
+                self.served += 1
 
         try:
             deadline = int(fields.get("deadline_ms") or 0) / 1000

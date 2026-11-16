@@ -49,12 +49,14 @@ class FakeBackend:
         self._task: asyncio.Task | None = None
         self.steps = 0
         self.batch_sum = 0
+        self.hits = 0
+        self.misses = 0
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._loop())
 
     def stats(self) -> dict:
-        return {"active": len(self.active), "cached_prefixes": len(self.cache)}
+        return {"active": len(self.active), "cached_prefixes": len(self.cache), "hits": self.hits, "misses": self.misses}
 
     def _length(self, job: Job) -> int:
         # replies of 48-128 tokens, fixed per request id, never above max_tokens
@@ -85,6 +87,9 @@ class FakeBackend:
         hit = bool(job.prefix) and job.prefix in self.cache
         if hit:
             self.cache.move_to_end(job.prefix)
+        if job.prefix:
+            self.hits += hit
+            self.misses += not hit
         # prefill: the cached prefix is skipped, only the new turn is processed
         await asyncio.sleep(pt * (0.15 if hit else 1.0) * self.cfg.fake_prefill_ms_per_token / 1000)
         if job.prefix:

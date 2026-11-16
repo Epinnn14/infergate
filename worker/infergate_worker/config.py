@@ -14,11 +14,18 @@ def _f(name: str, default: float) -> float:
         return default
 
 
+def _default_id() -> str:
+    host = socket.gethostname()
+    prefix = os.environ.get("IG_WORKER_PREFIX", "").strip()
+    return f"{prefix}-{host[:6]}" if prefix else host
+
+
 @dataclass
 class Config:
     redis_url: str = field(default_factory=lambda: os.environ.get("IG_REDIS_URL", "redis://127.0.0.1:6379/0"))
     model: str = field(default_factory=lambda: os.environ.get("IG_MODEL", "tiny-v1"))
-    worker_id: str = field(default_factory=lambda: os.environ.get("IG_WORKER_ID") or socket.gethostname())
+    # IG_WORKER_ID, or IG_WORKER_PREFIX plus a short host id (replicas of one compose service), or the hostname
+    worker_id: str = field(default_factory=lambda: os.environ.get("IG_WORKER_ID") or _default_id())
     backend: str = field(default_factory=lambda: os.environ.get("IG_BACKEND", "fake"))
     # sequences generated at the same time (continuous batching slots)
     capacity: int = field(default_factory=lambda: int(_f("IG_CAPACITY", 8)))

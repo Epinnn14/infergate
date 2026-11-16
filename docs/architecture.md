@@ -33,7 +33,8 @@ hash, reply stream, absolute deadline, enqueue time and attempt number.
 ## Routing
 
 ```
-prefix  = sha256(all messages except the last)[:16]        # "" for a first message
+prefix  = sha256(leading system messages, or else the first message)[:16]
+          # stays the same as a conversation grows, so all its turns rank workers the same way
 ranking = sort live workers by mix(fnv64a(prefix + worker))  # rendezvous hashing
 load(w) = (inflight + unread in ig:w:<w>) / capacity
 

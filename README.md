@@ -70,11 +70,13 @@ What happens to one request:
 2. **Version.** The gateway picks the model version by registry weight, for example 90% `v1` and
    10% `v2`. The choice is sticky per API key and conversation, so a conversation never flips
    between versions halfway through.
-3. **Worker.** The conversation's prefix is everything except the newest message. Its hash is
-   ranked against the live workers by rendezvous hashing. The top worker gets the request on its
-   own stream unless its load ((in-flight + queued) / capacity) is at the limit; then the second
-   choice gets it. If both are full, the request goes to the version's shared stream, which
-   every worker reads and KEDA watches.
+3. **Worker.** The routing key is the part of the prompt that later requests start with too: the
+   leading system prompt if there is one, otherwise the conversation's first message, so a
+   conversation keeps the same key as it grows. The key is ranked against the live workers by
+   rendezvous hashing. The top worker gets the request on its own stream unless its load
+   ((in-flight + queued) / capacity) is at the limit; then the second choice gets it. If both
+   are full, the request goes to the version's shared stream, which every worker reads and KEDA
+   watches.
 4. **Generation.** The worker runs continuous batching and appends `token` events to the
    request's reply stream, then a `done` event with usage. The gateway turns these into OpenAI
    SSE chunks or a single JSON response.
@@ -123,6 +125,16 @@ delivery guarantees and every failure mode with how it is handled.
 docker compose up --build --scale worker=3
 # API on :8080, admin API on :8090, Grafana on :3000 (dashboard "infergate"), Prometheus on :9090
 ```
+
+**LAN mode**: one laptop is the hub, and every other computer on the same Wi-Fi joins as a
+worker with a single `docker run`. The gateway also serves a chat page at `/` that shows which
+machine answered each reply and a live view of the cluster. See [deploy/lan](deploy/lan/README.md).
+
+```powershell
+.\deploy\lan\hub.ps1      # prints the chat link and the join command for other laptops
+```
+
+![Chat page: replies tagged with the worker that answered, cluster panel with one laptop that just left](docs/chat-page.png)
 
 **Kubernetes on kind**, the same way CI does it:
 
@@ -190,6 +202,7 @@ registry/                     model / version / key registry (FastAPI + PostgreS
 deploy/helm/infergate         Helm chart: gateway, registry, per-version workers, KEDA, monitoring, Istio, NetworkPolicy
 deploy/terraform              module "platform" plus envs/kind and envs/existing-cluster
 deploy/argocd                 Argo CD Application
+deploy/lan                    LAN mode: hub on one laptop, workers on the others
 scripts/                      bench, chaos, kind end-to-end
 ```
 

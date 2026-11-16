@@ -33,7 +33,7 @@ class HFBackend:
         self.model.eval()
 
     def stats(self) -> dict:
-        return {"model": self.cfg.hf_model}
+        return {"hf_model": self.cfg.hf_model}
 
     async def generate(self, job: Job, emit: Emit, cancelled: Cancelled) -> Result:
         from transformers import StoppingCriteria, StoppingCriteriaList, TextIteratorStreamer

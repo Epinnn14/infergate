@@ -1,0 +1,36 @@
+# LAN mode: this machine is the hub that phones and other laptops on the same Wi-Fi connect to.
+# Start it with deploy/lan/hub.ps1 (Windows) or deploy/lan/hub.sh (macOS, Linux); they create
+# deploy/lan/.env with fresh secrets and print the join command for other machines.
+#
+# Differences from the plain compose file: Redis is reachable on the network with a password
+# (remote workers connect to it), the API key and admin token are random, and dead workers are
+# detected after 6 s instead of 15 s, so closing a laptop shows up quickly in a demo.
+
+x-lan-worker: &lan-worker
+  IG_REDIS_URL: redis://:${IG_LAN_REDIS_PASSWORD}@redis:6379/0
+  IG_WORKER_PREFIX: ${IG_LAN_HUB_NAME:-hub}
+  IG_DEAD_AFTER_S: "6"
+
+services:
+  redis:
+    command: ["redis-server", "--requirepass", "${IG_LAN_REDIS_PASSWORD:?run deploy/lan/hub.ps1 or hub.sh}", "--save", "", "--appendonly", "no"]
+    environment: { REDISCLI_AUTH: "${IG_LAN_REDIS_PASSWORD}" }
+    ports: ["6379:6379"]
+
+  registry:
+    environment:
+      IG_ADMIN_TOKEN: ${IG_LAN_ADMIN}
+      IG_BOOTSTRAP: >-
+        {"models": [{"name": "chat", "versions": [{"name": "sim-v1", "weight": 100}, {"name": "sim-v2", "weight": 0}]}],
+         "keys": [{"name": "lan", "key": "${IG_LAN_KEY}", "rpm": 0, "tpm": 0}]}
+
+  gateway:
+    environment:
+      IG_REDIS_PASSWORD: ${IG_LAN_REDIS_PASSWORD}
+      IG_HEARTBEAT_MAX_AGE: 4s
+
+  worker:
+    environment: *lan-worker
+
+  worker-v2:
+    environment: *lan-worker

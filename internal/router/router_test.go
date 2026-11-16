@@ -23,8 +23,19 @@ func TestPrefixHash(t *testing.T) {
 	if a == "" || a != b {
 		t.Fatalf("same system prompt should give the same prefix: %q %q", a, b)
 	}
-	if PrefixHash([]queue.Message{{Role: "user", Content: "hi"}}) != "" {
-		t.Fatal("a single message has no reusable prefix")
+	// without a system prompt, the first message keys the conversation, turn after turn
+	u1 := queue.Message{Role: "user", Content: "plan a trip to Bali"}
+	turn1 := PrefixHash([]queue.Message{u1})
+	turn3 := PrefixHash([]queue.Message{u1, {Role: "assistant", Content: "sure"}, {Role: "user", Content: "3 days"},
+		{Role: "assistant", Content: "ok"}, {Role: "user", Content: "budget?"}})
+	if turn1 == "" || turn1 != turn3 {
+		t.Fatalf("a conversation must keep its key as it grows: %q %q", turn1, turn3)
+	}
+	if PrefixHash([]queue.Message{{Role: "user", Content: "something else"}}) == turn1 {
+		t.Fatal("different conversations share a key")
+	}
+	if PrefixHash(nil) != "" {
+		t.Fatal("an empty chat has no key")
 	}
 }
 

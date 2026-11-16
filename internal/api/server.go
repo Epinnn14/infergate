@@ -110,6 +110,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/models", s.models)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
 	mux.HandleFunc("GET /readyz", s.ready)
+	mux.HandleFunc("GET /status", s.status)
+	mux.Handle("GET /{$}", chatPage())
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		s.metrics.Write(w)
@@ -205,6 +207,44 @@ func (s *Server) models(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// ---------------------------------------------------------------- /status
+
+// status is a public, read-only view of the cluster for the chat page: versions with their
+// traffic weight, queue depth and live workers. No keys, prompts or request data.
+func (s *Server) status(w http.ResponseWriter, r *http.Request) {
+	type version struct {
+		Name    string         `json:"name"`
+		Weight  int            `json:"weight"`
+		Queued  int64          `json:"queued"`
+		Workers []queue.Worker `json:"workers"`
+	}
+	type model struct {
+		Name     string    `json:"name"`
+		Versions []version `json:"versions"`
+	}
+	out := struct {
+		Time   int64   `json:"time"`
+		Models []model `json:"models"`
+	}{Time: time.Now().UnixMilli(), Models: []model{}}
+	if sn := s.routes.Get(); sn != nil {
+		for _, m := range sn.Models {
+			mo := model{Name: m.Name}
+			for _, v := range m.Versions {
+				waiting, pending, _ := queue.Depth(r.Context(), s.rc, v.Name)
+				ws := s.liveWorkers(r.Context(), v.Name)
+				if ws == nil {
+					ws = []queue.Worker{}
+				}
+				mo.Versions = append(mo.Versions, version{Name: v.Name, Weight: v.Weight, Queued: waiting + pending, Workers: ws})
+			}
+			out.Models = append(out.Models, mo)
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(out)
 }
 

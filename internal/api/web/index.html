@@ -1,0 +1,299 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>infergate</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='1' y='1' width='14' height='14' rx='3' fill='%230f766e'/%3E%3Cpath d='M5 4v8M8 6v6M11 8v4' stroke='white' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #14171c; --muted: #5d6673; --line: #e3e6eb;
+  --accent: #0f766e; --accent-ink: #ffffff; --accent-soft: #e2f3f1;
+  --warn: #b45309; --bad: #b91c1c; --ok: #15803d;
+  --bubble-user: #0f766e; --bubble-user-ink: #ffffff; --bubble-bot: #eef0f3;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0e1116; --panel: #161a21; --ink: #e7eaee; --muted: #9aa3ae; --line: #262c36;
+    --accent: #2dd4bf; --accent-ink: #062b27; --accent-soft: #11302d;
+    --warn: #f59e0b; --bad: #f87171; --ok: #4ade80;
+    --bubble-user: #134e4a; --bubble-user-ink: #e7fffb; --bubble-bot: #1d222b;
+  }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+button, input, select, textarea { font: inherit; color: inherit; }
+.app { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: 16px; height: 100%; padding: 16px; max-width: 1400px; margin: 0 auto; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; min-height: 0; }
+header { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.brand { font-weight: 650; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
+.dot.on { background: var(--ok); } .dot.off { background: var(--bad); }
+.spacer { flex: 1; }
+.field { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 13px; }
+.field input, .field select { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+.field input { width: 190px; font-family: var(--mono); font-size: 12px; }
+.btn { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 7px 12px; cursor: pointer; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.btn:disabled { opacity: .5; cursor: default; }
+.btn:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.chat { display: flex; flex-direction: column; min-height: 0; }
+#log { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.msg { max-width: min(680px, 88%); }
+.msg .bubble { padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user { align-self: flex-end; } .msg.user .bubble { background: var(--bubble-user); color: var(--bubble-user-ink); border-bottom-right-radius: 4px; }
+.msg.bot .bubble { background: var(--bubble-bot); border-bottom-left-radius: 4px; }
+.msg.err .bubble { background: transparent; border: 1px solid var(--bad); color: var(--bad); }
+.meta { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--muted); }
+.tag { font-family: var(--mono); font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+.tag.affinity { color: var(--ok); } .tag.spill { color: var(--warn); } .tag.shared { color: var(--muted); }
+.empty { margin: auto; text-align: center; color: var(--muted); max-width: 420px; }
+.empty h2 { color: var(--ink); font-size: 18px; margin: 0 0 6px; }
+form.compose { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); align-items: flex-end; }
+textarea { flex: 1; resize: none; border: 1px solid var(--line); background: var(--bg); border-radius: 10px; padding: 9px 12px; min-height: 42px; max-height: 160px; }
+.tools { display: flex; gap: 8px; padding: 0 12px 12px; flex-wrap: wrap; align-items: center; color: var(--muted); font-size: 13px; }
+aside { display: flex; flex-direction: column; min-height: 0; }
+aside h3 { margin: 0; font-size: 14px; }
+.section { padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.cluster { overflow-y: auto; flex: 1; min-height: 0; }
+.version { padding: 12px 16px; border-bottom: 1px solid var(--line); }
+.vhead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.vhead b { font-family: var(--mono); font-size: 13px; }
+.vhead span { color: var(--muted); font-size: 12px; }
+.weight { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden; margin-bottom: 10px; }
+.weight i { display: block; height: 100%; background: var(--accent); transition: width .4s; }
+.worker { border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; transition: opacity .4s, border-color .4s; }
+.worker.new { border-color: var(--ok); }
+.worker.gone { opacity: .45; border-style: dashed; }
+.wrow { display: flex; align-items: center; gap: 8px; }
+.wname { font-family: var(--mono); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.wstat { font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+.load { height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; margin-top: 7px; }
+.load i { display: block; height: 100%; background: var(--ok); transition: width .3s, background .3s; }
+.load i.hi { background: var(--warn); } .load i.full { background: var(--bad); }
+.none { color: var(--muted); font-size: 13px; }
+.feed { max-height: 200px; overflow-y: auto; padding: 10px 16px 14px; font-size: 12.5px; }
+.feed div { padding: 3px 0; color: var(--muted); } .feed b { color: var(--ink); font-weight: 600; }
+.feed time { font-family: var(--mono); font-size: 11px; margin-right: 6px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; height: auto; min-height: 100%; padding: 10px; }
+  .chat { height: 78vh; }
+  .field input { width: 140px; }
+  aside .cluster { max-height: none; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="app">
+  <main class="card chat">
+    <header>
+      <div class="brand"><span class="dot" id="conn" aria-hidden="true"></span>infergate</div>
+      <div class="spacer"></div>
+      <label class="field">Model <select id="model"><option>chat</option></select></label>
+      <label class="field">Key <input id="key" type="password" placeholder="sk-…" autocomplete="off" spellcheck="false"></label>
+    </header>
+    <div id="log" aria-live="polite">
+      <div class="empty" id="empty">
+        <h2>Chat with the cluster</h2>
+        <p>Each reply shows which worker answered and how it was routed. Keep chatting and the conversation stays on the worker that has it cached (<span class="tag affinity">affinity</span>). Press <b>Burst</b> to see load spread over every machine.</p>
+      </div>
+    </div>
+    <form class="compose" id="compose">
+      <label class="sr" for="input">Message</label>
+      <textarea id="input" rows="1" placeholder="Type a message…"></textarea>
+      <button class="btn primary" id="send" type="submit">Send</button>
+    </form>
+    <div class="tools">
+      <button class="btn" id="newchat" type="button">New chat</button>
+      <button class="btn" id="burst" type="button">Burst ×20</button>
+      <span id="note"></span>
+    </div>
+  </main>
+  <aside class="card">
+    <div class="section"><h3>Cluster</h3></div>
+    <div class="cluster" id="cluster"><div class="version none">Connecting…</div></div>
+    <div class="section" style="border-top:1px solid var(--line);border-bottom:0;padding-bottom:4px"><h3>Activity</h3></div>
+    <div class="feed" id="feed"></div>
+  </aside>
+</div>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+// a key handed over as #key=… (the fragment never reaches the server) is kept and removed from the URL
+const fromHash = new URLSearchParams(location.hash.slice(1)).get("key");
+if (fromHash) { store.set("ig.key", fromHash); history.replaceState(null, "", location.pathname); }
+$("key").value = store.get("ig.key");
+$("key").addEventListener("change", (e) => store.set("ig.key", e.target.value.trim()));
+
+let history_ = [];
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
+const now = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+function feed(html) {
+  const row = el("div"); row.append(el("time", "", now()));
+  for (const part of html) row.append(typeof part === "string" ? document.createTextNode(part) : el("b", "", part.b));
+  $("feed").prepend(row);
+  while ($("feed").children.length > 60) $("feed").lastChild.remove();
+}
+
+// ---------------------------------------------------------------- chat
+function addMsg(role, text) {
+  $("empty")?.remove();
+  const m = el("div", "msg " + role); const b = el("div", "bubble", text); m.append(b);
+  $("log").append(m); $("log").scrollTop = $("log").scrollHeight; return m;
+}
+function meta(m, h, ttft, tokens) {
+  const row = el("div", "meta");
+  const route = h.get("X-Infergate-Route") || "";
+  if (h.get("X-Infergate-Worker")) row.append(el("span", "tag", h.get("X-Infergate-Worker")));
+  if (route) row.append(el("span", "tag " + route, route));
+  if (h.get("X-Infergate-Version")) row.append(el("span", "tag", h.get("X-Infergate-Version")));
+  if (ttft != null) row.append(el("span", "", `first token ${ttft} ms`));
+  if (tokens) row.append(el("span", "", `${tokens} tokens`));
+  m.append(row);
+}
+function headers() {
+  const k = $("key").value.trim(); const h = { "Content-Type": "application/json" };
+  if (k) h.Authorization = "Bearer " + k; return h;
+}
+async function errorText(res) {
+  try { const j = await res.json(); return `${res.status}: ${j.error?.message || JSON.stringify(j)}`; } catch { return `HTTP ${res.status}`; }
+}
+
+$("compose").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const text = $("input").value.trim(); if (!text) return;
+  $("input").value = ""; $("send").disabled = true;
+  addMsg("user", text); history_.push({ role: "user", content: text });
+  const t0 = performance.now();
+  try {
+    const res = await fetch("/v1/chat/completions", { method: "POST", headers: headers(),
+      body: JSON.stringify({ model: $("model").value, messages: history_, stream: true, max_tokens: 160, stream_options: { include_usage: true } }) });
+    if (!res.ok) { addMsg("err", await errorText(res)); history_.pop(); return; }
+    const m = addMsg("bot", ""); const bubble = m.firstChild;
+    let ttft = null, tokens = 0, out = "", buf = "";
+    const reader = res.body.getReader(); const dec = new TextDecoder();
+    for (;;) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf("\n\n")) >= 0) {
+        const line = buf.slice(0, i).trim(); buf = buf.slice(i + 2);
+        if (!line.startsWith("data: ")) continue;
+        const data = line.slice(6); if (data === "[DONE]") continue;
+        const c = JSON.parse(data);
+        if (c.error) { bubble.textContent += `\n[${c.error.message}]`; continue; }
+        const d = c.choices?.[0]?.delta?.content;
+        if (d) { if (ttft == null) ttft = Math.round(performance.now() - t0); out += d; bubble.textContent = out; $("log").scrollTop = $("log").scrollHeight; }
+        if (c.usage) tokens = c.usage.completion_tokens;
+      }
+    }
+    history_.push({ role: "assistant", content: out });
+    meta(m, res.headers, ttft, tokens);
+    feed(["reply from ", { b: res.headers.get("X-Infergate-Worker") || "?" }, ` (${res.headers.get("X-Infergate-Route") || "?"}, first token ${ttft ?? "-"} ms)`]);
+  } catch (err) {
+    addMsg("err", String(err)); history_.pop();
+  } finally { $("send").disabled = false; $("input").focus(); }
+});
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("compose").requestSubmit(); }
+});
+$("input").addEventListener("input", (e) => { e.target.style.height = "auto"; e.target.style.height = Math.min(160, e.target.scrollHeight) + "px"; });
+$("newchat").addEventListener("click", () => {
+  history_ = []; $("log").replaceChildren(); $("note").textContent = "New conversation: it may land on a different worker.";
+});
+
+// 20 conversations at once, each with its own long system prompt, to show load spreading out
+$("burst").addEventListener("click", async () => {
+  $("burst").disabled = true; $("note").textContent = "Sending 20 requests…";
+  const t0 = performance.now(); const per = {}; let ok = 0, failed = 0;
+  await Promise.all(Array.from({ length: 20 }, async (_, i) => {
+    const conv = Math.floor(Math.random() * 1e6);
+    const sys = `You are assistant ${conv}. ` + "Answer briefly and precisely. ".repeat(120);
+    try {
+      const res = await fetch("/v1/chat/completions", { method: "POST", headers: headers(),
+        body: JSON.stringify({ model: $("model").value, max_tokens: 48, messages: [{ role: "system", content: sys }, { role: "user", content: `Question ${i + 1}` }] }) });
+      if (!res.ok) { failed++; return; }
+      await res.json(); ok++;
+      const w = res.headers.get("X-Infergate-Worker") || "?"; per[w] = (per[w] || 0) + 1;
+    } catch { failed++; }
+  }));
+  const secs = ((performance.now() - t0) / 1000).toFixed(1);
+  const spread = Object.entries(per).sort((a, b) => b[1] - a[1]).map(([w, n]) => `${w} ${n}`).join(", ");
+  $("note").textContent = `Burst: ${ok} ok${failed ? `, ${failed} failed` : ""} in ${secs}s — ${spread || "no worker"}`;
+  feed(["burst of 20: ", { b: `${ok} ok` }, ` in ${secs}s across ${Object.keys(per).length} worker(s)`]);
+  $("burst").disabled = false;
+});
+
+// ---------------------------------------------------------------- cluster
+const seen = new Map();   // worker id → {last status, gone timestamp}
+let firstPoll = true;
+function workerCard(w, gone) {
+  const card = el("div", "worker" + (gone ? " gone" : ""));
+  const row = el("div", "wrow");
+  row.append(el("span", "wname", w.id));
+  const looked = (w.cache_hits || 0) + (w.cache_misses || 0);
+  const hit = looked ? Math.round(100 * w.cache_hits / looked) + "% cache" : "";
+  row.append(el("span", "wstat", gone ? "left" : [`${w.inflight}/${w.capacity}`, `${w.served} served`, hit].filter(Boolean).join(" · ")));
+  card.append(row);
+  const bar = el("div", "load"); const fill = el("i");
+  const load = gone ? 0 : (w.inflight + w.backlog) / Math.max(1, w.capacity);
+  fill.style.width = Math.min(100, Math.round(load * 100)) + "%";
+  if (load >= 1) fill.className = "full"; else if (load >= 0.75) fill.className = "hi";
+  bar.append(fill); card.append(bar);
+  if (!gone && seen.get(w.id)?.fresh) card.classList.add("new");
+  return card;
+}
+async function poll() {
+  try {
+    const res = await fetch("/status", { cache: "no-store" });
+    const s = await res.json();
+    $("conn").className = "dot on";
+    const live = new Set();
+    const models = s.models || [];
+    const select = $("model");
+    if (select.dataset.names !== models.map((m) => m.name).join()) {
+      select.replaceChildren(...models.map((m) => el("option", "", m.name)));
+      select.dataset.names = models.map((m) => m.name).join();
+    }
+    const box = []; const t = Date.now();
+    for (const m of models) for (const v of m.versions) {
+      const sec = el("div", "version");
+      const head = el("div", "vhead");
+      head.append(el("b", "", v.name), el("span", "", `${m.name} · ${v.weight}% of traffic · ${v.queued} queued`));
+      const wbar = el("div", "weight"); const wi = el("i"); wi.style.width = v.weight + "%"; wbar.append(wi);
+      sec.append(head, wbar);
+      for (const w of [...v.workers].sort((a, b) => a.id.localeCompare(b.id))) {
+        live.add(w.id);
+        const prev = seen.get(w.id);
+        if (!prev || prev.gone) { if (!firstPoll) feed([{ b: w.id }, ` joined ${v.name}`]); seen.set(w.id, { w, version: v.name, fresh: !firstPoll, since: t }); }
+        else { prev.w = w; prev.fresh = t - prev.since < 4000 && prev.fresh; }
+        sec.append(workerCard(w, false));
+      }
+      for (const [id, info] of seen) {
+        if (info.version !== v.name || live.has(id)) continue;
+        if (!info.gone) { info.gone = t; feed([{ b: id }, " left — its requests are taken over by the others"]); }
+        if (t - info.gone < 15000) sec.append(workerCard(info.w, true)); else seen.delete(id);
+      }
+      if (!v.workers.length) sec.append(el("div", "none", v.weight ? "No workers yet — requests wait in the queue." : "No workers (no traffic)."));
+      box.push(sec);
+    }
+    $("cluster").replaceChildren(...(box.length ? box : [el("div", "version none", "No models in the registry.")]));
+    firstPoll = false;
+  } catch {
+    $("conn").className = "dot off";
+  } finally { setTimeout(poll, 1000); }
+}
+poll();
+</script>
+</body>
+</html>

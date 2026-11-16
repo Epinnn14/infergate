@@ -112,10 +112,15 @@ func Cleanup(ctx context.Context, rc *redis.Client, req string) {
 
 // Worker is a live worker as seen by the gateway.
 type Worker struct {
-	ID       string
-	Inflight int
-	Capacity int
-	Backlog  int // messages waiting in its own stream
+	ID       string `json:"id"`
+	Inflight int    `json:"inflight"`
+	Capacity int    `json:"capacity"`
+	Backlog  int    `json:"backlog"` // messages waiting in its own stream
+	// reported by the worker, for the status page
+	Served      int64 `json:"served"`
+	CacheHits   int64 `json:"cache_hits"`
+	CacheMisses int64 `json:"cache_misses"`
+	StartedUnix int64 `json:"started"`
 }
 
 // Load is how busy the worker is: in-flight plus waiting, over capacity.
@@ -143,7 +148,11 @@ func LiveWorkers(ctx context.Context, rc *redis.Client, model string, maxAge tim
 		capacity, _ := strconv.Atoi(h["capacity"])
 		// backlog = routed here but not picked up yet; in-flight ones are already in "inflight"
 		backlog, _, _ := streamDepth(ctx, rc, WorkerStream(id))
-		out = append(out, Worker{ID: id, Inflight: inflight, Capacity: capacity, Backlog: int(backlog)})
+		num := func(k string) int64 { n, _ := strconv.ParseInt(h[k], 10, 64); return n }
+		out = append(out, Worker{
+			ID: id, Inflight: inflight, Capacity: capacity, Backlog: int(backlog),
+			Served: num("served"), CacheHits: num("hits"), CacheMisses: num("misses"), StartedUnix: num("started"),
+		})
 	}
 	return out, nil
 }

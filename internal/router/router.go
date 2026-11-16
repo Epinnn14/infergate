@@ -22,14 +22,28 @@ import (
 	"github.com/Epinnn14/infergate/internal/queue"
 )
 
-// PrefixHash identifies the cacheable part of a chat: everything before the last message.
-// A single-message chat has no reusable prefix and returns "".
+// PrefixHash is the routing key for prefix-cache affinity: the start of the prompt that later
+// requests will begin with too, so they land on the worker that already has it cached.
+//
+//   - Leading system messages, when there are any: an app's or persona's instructions, usually
+//     long and shared by many conversations, which then share one worker's cache.
+//   - Otherwise the conversation's first message, which every later turn repeats.
+//
+// Either way the key stays the same as a conversation grows, so its turns stay together.
+// It is "" only for an empty chat.
 func PrefixHash(msgs []queue.Message) string {
-	if len(msgs) < 2 {
-		return ""
+	n := 0
+	for n < len(msgs) && msgs[n].Role == "system" {
+		n++
+	}
+	if n == 0 {
+		if len(msgs) == 0 {
+			return ""
+		}
+		n = 1
 	}
 	h := sha256.New()
-	for _, m := range msgs[:len(msgs)-1] {
+	for _, m := range msgs[:n] {
 		h.Write([]byte(m.Role))
 		h.Write([]byte{0})
 		h.Write([]byte(m.Content))
