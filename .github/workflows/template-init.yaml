@@ -32,6 +32,6 @@ jobs:
           {
             echo "### Template set up for ${{ github.repository }}"
             echo
-            echo "Module path, images (ghcr.io/<owner>/infergate-*) and links now point here."
+            echo "Module path, images (ghcr.io/<owner>/<repo>-gateway, -worker, -registry) and links now point here."
             echo "Pull before you change anything: \`git pull\`."
           } >> "$GITHUB_STEP_SUMMARY"

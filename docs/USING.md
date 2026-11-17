@@ -21,7 +21,7 @@ Contents:
 
 **From the template (recommended).** On the repository page, click **Use this template → Create
 a new repository**. On the first push, the `template-init` workflow rewrites the Go module path,
-the image names (`ghcr.io/<you>/infergate-*`) and links to your repository and commits the
+the image names (`ghcr.io/<you>/<repo>-gateway`, `-worker`, `-registry`) and links to your repository and commits the
 change. Run `git pull` once it has finished. CI then builds and tests everything and publishes
 your images to GHCR on every push to `main`.
 

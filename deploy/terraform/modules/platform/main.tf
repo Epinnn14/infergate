@@ -3,7 +3,7 @@
 
 locals {
   image = { for c in ["gateway", "worker", "registry"] : c => {
-    repository = "${var.image_registry}/infergate-${c}"
+    repository = "${var.image_registry}/${var.image_name_prefix}-${c}"
     tag        = var.image_tag
   } }
 

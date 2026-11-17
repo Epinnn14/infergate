@@ -15,6 +15,12 @@ variable "image_registry" {
   default     = "ghcr.io/epinnn14"
 }
 
+variable "image_name_prefix" {
+  description = "Images are <prefix>-gateway, -worker and -registry: the repository name that CI publishes them under."
+  type        = string
+  default     = "infergate" # image-prefix
+}
+
 variable "image_tag" {
   description = "Image tag for gateway, worker and registry. Empty = the chart's appVersion."
   type        = string

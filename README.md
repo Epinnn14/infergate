@@ -187,7 +187,7 @@ The secret is returned once and only its SHA-256 hash is stored.
 | Helm, Terraform | `helm lint --strict` and kubeconform on every values set, including the KEDA, Prometheus Operator and Istio CRDs; `terraform validate` for both environments |
 | Benchmark | Affinity versus shared queue, plus the chaos run, with tables in the job summary |
 | End-to-end on kind | Installs KEDA and the chart, then: API smoke test; KEDA scales workers out under 48 concurrent clients; a 20% canary on a version with 0 replicas scales from zero and serves traffic; a worker pod is force-deleted mid-load with no request lost |
-| Images | On `main`: multi-arch images pushed to GHCR (`infergate-gateway`, `-worker`, `-registry`) |
+| Images | On `main`: multi-arch images pushed to GHCR as `<repo>-gateway`, `-worker`, `-registry` (here `infergate-*`) |
 
 ## Observability
 
